@@ -46,12 +46,12 @@ This roadmap breaks the project into small, parallelizable work items suitable f
 
 ---
 
-## 1) Log Format Recon & Sample Fixtures
+## 1) Log Format Recon & Sample Fixtures - ✅ COMPLETED
 
-### 1.1 Build fixtures from sample logs
+### 1.1 Build fixtures from sample logs - ✅ COMPLETED
 **Tasks**
-- Add `fixtures/` (not committed if too large; keep small representative snippets)
-- Create 3–5 small fixture log files covering:
+- ✅ Add `fixtures/` (not committed if too large; keep small representative snippets)
+- ✅ Create 3–5 small fixture log files covering:
     - simple chat completion with streaming
     - tool call (with partial arguments across deltas)
     - prompt processing progress lines present
@@ -59,17 +59,17 @@ This roadmap breaks the project into small, parallelizable work items suitable f
     - malformed/partial JSON (edge case)
 
 **Deliverables**
-- Fixture files in repo (or generated in tests)
-- A short `fixtures/README.md` describing what each file contains
+- ✅ Fixture files in repo
+- ✅ A short `fixtures/README.md` describing what each file contains
 
 **Acceptance**
-- Fixture set is sufficient to test parser logic
+- ✅ Fixture set is sufficient to test parser logic
 
 ---
 
-### 1.2 Document the observed log grammar (internal doc)
+### 1.2 Document the observed log grammar (internal doc) - ✅ COMPLETED
 **Tasks**
-- Write `docs/log-format.md` describing:
+- ✅ Write `docs/log-format.md` describing:
     - known line prefixes and timestamps
     - JSON blocks that may span multiple lines
     - how chat ids appear (packet JSON `id`)
@@ -77,11 +77,502 @@ This roadmap breaks the project into small, parallelizable work items suitable f
     - where tool_calls appear
 
 **Deliverables**
-- `docs/log-format.md`
+- ✅ `docs/log-format.md`
 
 **Acceptance**
-- Another dev can implement parser from this document alone
+- ✅ Another dev can implement parser from this document alone
 
 ---
 
 ## 2) Data Model & Types
+
+### 2.1 Define core types
+**Tasks**
+- Create `types/session.ts`:
+    - `Session`, `SessionMetrics`
+    - `TimelineEvent` union
+    - `ToolCallEvent`
+    - `RequestEvent`, `PacketEvent`, etc. as needed
+- Create `types/api.ts`:
+    - `SessionsListItem`
+    - API response shapes for `/api/sessions` and `/api/sessions/[chatId]`
+
+**Deliverables**
+- TypeScript types with comments
+
+**Acceptance**
+- Types compile and are used by both API and UI
+
+---
+
+### 2.2 Normalized event schema
+**Tasks**
+- Decide canonical timestamp format (ISO string)
+- Define `durationMs` conventions:
+    - per-stage durations stored vs computed in UI
+- Decide how to store raw data (for expandable JSON views)
+
+**Deliverables**
+- `types/events.ts` (or consolidated)
+
+**Acceptance**
+- Clear, consistent structures for timeline rendering
+
+---
+
+## 3) Parser (Core Engine)
+
+### 3.1 Streaming file reader + line tokenizer
+**Tasks**
+- Implement `readLogFileLines(filePath)` using Node streams + readline
+- Parse standard log prefix:
+    - `[YYYY-MM-DD HH:MM:SS][LEVEL]...`
+- Emit tokens:
+    - `{ ts, level, message, rawLine }`
+
+**Deliverables**
+- `lib/parser/lineReader.ts`
+- Unit tests against fixture files
+
+**Acceptance**
+- Correctly extracts timestamps and message text for every fixture line
+
+---
+
+### 3.2 Multiline JSON extractor (brace-balanced)
+**Tasks**
+- Detect JSON start for lines containing:
+    - `Received request: POST to /v1/chat/completions with body {`
+    - `Generated packet: {`
+- Implement brace-balancing accumulator:
+    - handles nested braces
+    - handles braces inside JSON strings (important!)
+        - recommended approach: use a small state machine tracking string/escape state
+- Return parsed object + `rawJson` string
+- Gracefully handle parse errors:
+    - emit `parser_error` event containing raw snippet + ts
+
+**Deliverables**
+- `lib/parser/jsonBlock.ts`
+- Tests:
+    - successful extraction
+    - braces in strings
+    - malformed JSON produces error event but does not crash
+
+**Acceptance**
+- Parser never crashes on malformed fixture lines
+- Correctly reconstructs JSON blocks spanning multiple lines
+
+---
+
+### 3.3 Event classification & extraction
+**Tasks**
+- Convert tokens into normalized events:
+    - `request_received` with request body (messages, model, tools if present)
+    - `prompt_progress` with percent
+    - `packet_generated` with packet JSON
+    - `stream_finished`
+- Add “raw” fallback events optionally (for debugging)
+
+**Deliverables**
+- `lib/parser/events.ts`
+- Tests verifying event types emitted per fixture
+
+**Acceptance**
+- Events are emitted in correct chronological order with correct timestamps
+
+---
+
+### 3.4 Session correlation (request → chat id)
+**Tasks**
+- Implement heuristic mapping:
+    - store “pending request” objects keyed by time
+    - when a new packet with unknown chat id appears shortly after, attach nearest pending request
+- Configurable window (e.g. 5–15 seconds)
+- Guard against mismatches:
+    - if multiple pending requests, choose closest in time
+    - record a correlation confidence score (optional)
+
+**Deliverables**
+- `lib/parser/sessionLinker.ts`
+- Tests with fixture containing multiple interleaved sessions
+
+**Acceptance**
+- In fixtures, request is attached to correct chat id session
+
+---
+
+### 3.5 Tool call aggregation (merge partial arguments)
+**Tasks**
+- Extract `choices[].delta.tool_calls[]`
+- Merge tool call entries by `tool_call.id`:
+    - accumulate `function.arguments` strings across deltas
+    - track first seen ts and last updated ts
+- Attempt to parse arguments as JSON if final string is valid
+- Store both:
+    - `argumentsText` (raw)
+    - `argumentsJson` (parsed or null)
+
+**Deliverables**
+- `lib/parser/toolCalls.ts`
+- Tests for partial argument streaming
+
+**Acceptance**
+- Tool calls show correct merged args for fixture sessions
+
+---
+
+### 3.6 Assistant content reconstruction
+**Tasks**
+- Concatenate `choices[].delta.content` across packets
+- Track:
+    - first content ts
+    - last content ts
+- Store chunks for timeline display (optional):
+    - either store as one combined string + chunk boundaries
+    - or store chunk events and compute combined on the fly
+
+**Deliverables**
+- `lib/parser/content.ts`
+- Tests verifying reconstructed content matches expected
+
+**Acceptance**
+- Timeline can show full assistant response text
+
+---
+
+### 3.7 Usage extraction & metrics computation
+**Tasks**
+- Detect `usage` field in final packet (often in last chunk)
+- Compute per-session metrics:
+    - `promptTokens`, `completionTokens`, `totalTokens`
+    - `streamLatencyMs` = first packet ts → stream finished ts
+    - `tokensPerSecond` = completionTokens / (latency seconds)
+    - `promptProcessingMs`:
+        - first prompt progress ts (0% or first seen) → first packet ts
+        - if missing, null
+- Store computed metrics on session
+
+**Deliverables**
+- `lib/parser/metrics.ts`
+- Tests with fixtures containing usage and progress lines
+
+**Acceptance**
+- Metrics match expected values from fixtures
+
+---
+
+## 4) Indexer (File Discovery + Caching)
+
+### 4.1 Log folder discovery (Mac)
+**Tasks**
+- Resolve log root
+- Scan month folders `[yyyy-mm]`
+- Pick:
+    - latest month by default
+    - optional: include last N months/days config
+- List `.log` files in month folder sorted by date
+
+**Deliverables**
+- `lib/indexer/discovery.ts`
+
+**Acceptance**
+- Returns ordered list of files in a real LM Studio log directory
+
+---
+
+### 4.2 In-memory session index
+**Tasks**
+- Parse each file and update `Map<chatId, Session>`
+- Store lightweight list item summary:
+    - `chatId`, `firstSeenAt`, `model`, token totals if known
+- Provide functions:
+    - `buildIndex()`
+    - `getSessionsList()`
+    - `getSession(chatId)`
+
+**Deliverables**
+- `lib/indexer/index.ts`
+
+**Acceptance**
+- Index builds without blocking UI excessively for moderate logs
+
+---
+
+### 4.3 Refresh & invalidation
+**Tasks**
+- Implement:
+    - “last indexed at” timestamp
+    - manual refresh endpoint
+- Optional: simple file mtime caching to skip unchanged files
+
+**Deliverables**
+- `lib/indexer/cache.ts`
+- `POST /api/reindex`
+
+**Acceptance**
+- Refresh updates the session list when new logs are appended
+
+---
+
+## 5) API Routes (Server-only)
+
+### 5.1 `GET /api/sessions`
+**Tasks**
+- Returns list of sessions:
+    - `[{ chatId, firstSeenAt, model, promptTokens, completionTokens, streamLatencyMs }]`
+- Support query params:
+    - `q=` search by chat id substring
+    - `limit=`
+    - `offset=` or `cursor=` (optional v0)
+
+**Deliverables**
+- `app/api/sessions/route.ts`
+
+**Acceptance**
+- Sidebar can load and filter sessions via this endpoint
+
+---
+
+### 5.2 `GET /api/sessions/[chatId]`
+**Tasks**
+- Returns full session:
+    - request messages
+    - tool calls
+    - metrics
+    - timeline events (normalized)
+- Ensure response size is acceptable:
+    - consider truncation rules (optional):
+        - cap raw content size per event
+        - offer “raw mode” later
+
+**Deliverables**
+- `app/api/sessions/[chatId]/route.ts`
+
+**Acceptance**
+- Selecting a session loads full details reliably
+
+---
+
+## 6) Frontend UI (shadcn + Tailwind only)
+
+### 6.1 App shell layout
+**Tasks**
+- Two-pane layout:
+    - left sidebar: fixed width, scrollable list
+    - right content: scrollable details
+- Route state:
+    - use `?session=` query param or dynamic route `/session/[chatId]`
+- Loading and error states:
+    - skeletons (shadcn)
+    - empty state when no sessions
+
+**Deliverables**
+- `app/page.tsx` (or route structure)
+- `components/layout/AppShell.tsx`
+
+**Acceptance**
+- App boots with clean layout and placeholder states
+
+---
+
+### 6.2 Sidebar: sessions list
+**Tasks**
+- Search input with debounced fetch
+- List items with:
+    - truncated id + copy button
+    - model badge
+    - token badge
+    - time badge (firstSeenAt)
+- Highlight selected session
+
+**Deliverables**
+- `components/sessions/SessionsSidebar.tsx`
+
+**Acceptance**
+- User can filter and select sessions quickly
+
+---
+
+### 6.3 Section: Tool Calls UI
+**Tasks**
+- Render tool calls as Accordion items:
+    - header: tool name + tool id + requested time
+    - body: arguments table (key/value) if JSON
+    - raw arguments in code block
+- Timing display:
+    - inferred duration if available else “Unknown”
+
+**Deliverables**
+- `components/session/ToolCallsPanel.tsx`
+
+**Acceptance**
+- Tool calls are readable and payloads are usable for debugging
+
+---
+
+### 6.4 Section: Performance Metrics UI
+**Tasks**
+- Render metrics table
+- Show derived values:
+    - tokens/sec with 2 decimals
+    - latency in ms + human readable (e.g. 1.23s)
+- Show “Unknown” for missing values
+
+**Deliverables**
+- `components/session/MetricsPanel.tsx`
+
+**Acceptance**
+- Metrics appear correct for sessions with usage
+
+---
+
+### 6.5 Section: Session Timeline UI
+**Tasks**
+- Timeline list of cards:
+    - event title, timestamp
+    - duration since previous event
+    - collapsible details:
+        - request messages (system/user/assistant)
+        - assistant reconstructed content
+        - tool call details inline
+- Provide “Show raw JSON” toggle per event (Collapsible)
+
+**Deliverables**
+- `components/session/TimelinePanel.tsx`
+
+**Acceptance**
+- Timeline supports auditing prompts and responses end-to-end
+
+---
+
+### 6.6 Tabs / Navigation within session
+**Tasks**
+- Use shadcn Tabs:
+    - Tool Calls
+    - Metrics
+    - Timeline
+- Keep timeline as default (optional)
+
+**Deliverables**
+- `components/session/SessionTabs.tsx`
+
+**Acceptance**
+- Session detail view is navigable and not overwhelming
+
+---
+
+## 7) QA, Testing, and Hardening
+
+### 7.1 Unit tests for parser/indexer
+**Tasks**
+- Use Vitest or Jest
+- Test:
+    - multiline JSON extraction
+    - tool call merge logic
+    - session linking heuristic
+    - metrics computations
+
+**Deliverables**
+- `lib/**/__tests__/*`
+
+**Acceptance**
+- CI-ready test suite runs fast and reliably
+
+---
+
+### 7.2 Robustness + edge cases
+**Tasks**
+- Handle:
+    - log truncation mid-JSON
+    - missing stream finished lines
+    - sessions spanning multiple log files
+    - interleaved sessions
+- Add safe guards:
+    - max JSON size limit (configurable)
+    - max events stored per session (optional)
+
+**Deliverables**
+- Error handling improvements and documented constraints
+
+**Acceptance**
+- App doesn’t crash on “weird” logs; shows partial info gracefully
+
+---
+
+### 7.3 Developer diagnostics
+**Tasks**
+- Add optional debug view:
+    - raw events list
+    - parser errors list
+- Add server logs around indexing duration
+
+**Deliverables**
+- `components/debug/*` (optional gated behind env `DEBUG=true`)
+
+**Acceptance**
+- Easier to diagnose parsing issues in the field
+
+---
+
+## 8) Documentation & Release
+
+### 8.1 README
+**Tasks**
+- Project overview
+- Install/run instructions
+- Configuration (`LMS_LOG_ROOT`)
+- Supported platforms (Mac v0)
+- Known limitations (tool timing inference)
+
+**Deliverables**
+- `README.md`
+
+**Acceptance**
+- Fresh dev can run it in <10 minutes
+
+---
+
+### 8.2 Roadmap tracking & issue templates
+**Tasks**
+- Convert major milestones to GitHub issues
+- Add issue templates:
+    - bug report
+    - parser edge case request
+    - feature request
+
+**Deliverables**
+- `.github/ISSUE_TEMPLATE/*` (optional)
+
+**Acceptance**
+- Contributors can file consistent issues
+
+---
+
+## Suggested Work Allocation (Agent-Friendly)
+
+### Agent A — Parser Core
+- 3.1–3.7 (line reader, JSON extractor, event extraction, tool merge, metrics)
+
+### Agent B — Indexer + API
+- 4.1–4.3, 5.1–5.2
+
+### Agent C — UI Shell + Sidebar
+- 6.1–6.2
+
+### Agent D — Session Detail Panels
+- 6.3–6.6 (Tool Calls, Metrics, Timeline, Tabs)
+
+### Agent E — QA + Docs
+- 7.1–7.3, 8.1–8.2
+
+---
+
+## MVP Exit Checklist
+- [ ] Sessions list loads from real LM Studio log directory
+- [ ] Selecting chat id shows Tool Calls, Metrics, Timeline
+- [ ] Tool call arguments merge correctly across deltas
+- [ ] Metrics computed (tokens, latency, tokens/sec) when usage exists
+- [ ] Timeline shows system/user prompts and reconstructed assistant content
+- [ ] App handles malformed logs without crashing
+- [ ] README included with setup + configuration
