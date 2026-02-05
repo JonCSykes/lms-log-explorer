@@ -1,0 +1,5 @@
+[2024-01-15 14:00:00][INFO] Received request: POST to /v1/chat/completions with body {"model":"gpt-4","messages":[{"role":"user","content":"test"}],"stream":true}
+[2024-01-15 14:00:01][INFO] Generated packet: {"id":"chatcmpl-err1","object":"chat.completion.chunk","created":1705329601,"model":"gpt-4","choices":[{"index":0,"delta":{"content":"Before malformed"}]}
+[2024-01-15 14:00:02][INFO] Generated packet: {"broken json here
+[2024-01-15 14:00:03][INFO] Generated packet: {"id":"chatcmpl-err1","object":"chat.completion.chunk","created":1705329603,"model":"gpt-4","choices":[{"index":0,"delta":{"content":"After malformed"},"finish_reason":"","usage":{"prompt_tokens":5,"completion_tokens":3,"total_tokens":8}}]}
+[2024-01-15 14:00:03][INFO] Finished streaming response

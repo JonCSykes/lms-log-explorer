@@ -46,12 +46,12 @@ This roadmap breaks the project into small, parallelizable work items suitable f
 
 ---
 
-## 1) Log Format Recon & Sample Fixtures
+## 1) Log Format Recon & Sample Fixtures - ✅ COMPLETED
 
-### 1.1 Build fixtures from sample logs
+### 1.1 Build fixtures from sample logs - ✅ COMPLETED
 **Tasks**
-- Add `fixtures/` (not committed if too large; keep small representative snippets)
-- Create 3–5 small fixture log files covering:
+- ✅ Add `fixtures/` (not committed if too large; keep small representative snippets)
+- ✅ Create 3–5 small fixture log files covering:
     - simple chat completion with streaming
     - tool call (with partial arguments across deltas)
     - prompt processing progress lines present
@@ -59,17 +59,17 @@ This roadmap breaks the project into small, parallelizable work items suitable f
     - malformed/partial JSON (edge case)
 
 **Deliverables**
-- Fixture files in repo (or generated in tests)
-- A short `fixtures/README.md` describing what each file contains
+- ✅ Fixture files in repo
+- ✅ A short `fixtures/README.md` describing what each file contains
 
 **Acceptance**
-- Fixture set is sufficient to test parser logic
+- ✅ Fixture set is sufficient to test parser logic
 
 ---
 
-### 1.2 Document the observed log grammar (internal doc)
+### 1.2 Document the observed log grammar (internal doc) - ✅ COMPLETED
 **Tasks**
-- Write `docs/log-format.md` describing:
+- ✅ Write `docs/log-format.md` describing:
     - known line prefixes and timestamps
     - JSON blocks that may span multiple lines
     - how chat ids appear (packet JSON `id`)
@@ -77,10 +77,10 @@ This roadmap breaks the project into small, parallelizable work items suitable f
     - where tool_calls appear
 
 **Deliverables**
-- `docs/log-format.md`
+- ✅ `docs/log-format.md`
 
 **Acceptance**
-- Another dev can implement parser from this document alone
+- ✅ Another dev can implement parser from this document alone
 
 ---
 
