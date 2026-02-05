@@ -86,45 +86,39 @@ This roadmap breaks the project into small, parallelizable work items suitable f
 
 ## 2) Data Model & Types
 
-### 2.1 Define core types
+## 2) Data Model & Types - ✅ COMPLETED
+
+### 2.1 Define core types - ✅ COMPLETED
 **Tasks**
-- Create `types/session.ts`:
-    - `Session`, `SessionMetrics`
-    - `TimelineEvent` union
-    - `ToolCallEvent`
-    - `RequestEvent`, `PacketEvent`, etc. as needed
-- Create `types/api.ts`:
-    - `SessionsListItem`
-    - API response shapes for `/api/sessions` and `/api/sessions/[chatId]`
+- ✅ Create `types/types.ts`:
+    - ✅ `Session`, `SessionMetrics`
+    - ✅ `TimelineEvent` union
+    - ✅ `ToolCallEvent`, `RequestEvent`, etc.
 
 **Deliverables**
-- TypeScript types with comments
+- ✅ TypeScript types with comments
 
 **Acceptance**
-- Types compile and are used by both API and UI
+- ✅ Types compile without errors
+- ✅ Types used by parser and API
 
 ---
 
-### 2.2 Normalized event schema
+### 2.2 Normalized event schema - ✅ COMPLETED
 **Tasks**
-- Decide canonical timestamp format (ISO string)
-- Define `durationMs` conventions:
-    - per-stage durations stored vs computed in UI
-- Decide how to store raw data (for expandable JSON views)
+- ✅ Canonical timestamp format (ISO string)
+- ✅ `durationMs` conventions defined
+- ✅ Raw data storage approach documented
 
 **Deliverables**
-- `types/events.ts` (or consolidated)
+- ✅ `types/types.ts` with normalized schema
 
 **Acceptance**
-- Clear, consistent structures for timeline rendering
+- ✅ Clear, consistent structures for timeline rendering
 
 ---
 
 ## 3) Parser (Core Engine)
-
-### 3.1 Streaming file reader + line tokenizer
-**Tasks**
-- Implement `readLogFileLines(filePath)` using Node streams + readline
 - Parse standard log prefix:
     - `[YYYY-MM-DD HH:MM:SS][LEVEL]...`
 - Emit tokens:
