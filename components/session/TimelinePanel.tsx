@@ -117,12 +117,11 @@ export default function TimelinePanel({ events }: TimelinePanelProps) {
               ? formatDuration(event.ts, nextEvent.ts)
               : undefined
 
-            return (
-              <Collapsible
-                key={event.id}
-                defaultOpen
-                className="rounded-lg border border-border"
-              >
+return (
+               <Collapsible
+                 key={event.id}
+                 className="rounded-lg border border-border bg-background"
+               >
                 <CollapsibleTrigger asChild>
                   <button className="group flex w-full items-start justify-between gap-4 p-4 text-left">
                     <div className="space-y-1">
@@ -142,34 +141,34 @@ export default function TimelinePanel({ events }: TimelinePanelProps) {
                     </div>
                   </button>
                 </CollapsibleTrigger>
-                <CollapsibleContent className="px-4 pb-4">
-                  <div className="grid gap-3">
-                    <Card className="border-muted bg-muted/30">
-                      <CardHeader className="pb-2">
-                        <CardTitle className="text-sm">Details</CardTitle>
-                      </CardHeader>
-                      <CardContent>{renderDataTable(event.data)}</CardContent>
-                    </Card>
-                    <Separator />
-                    <Collapsible className="rounded-md border border-border">
-                      <CollapsibleTrigger asChild>
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          className="group w-full justify-between"
-                        >
-                          Raw event payload
-                          <ChevronDown className="size-4 transition-transform group-data-[state=open]:rotate-180" />
-                        </Button>
-                      </CollapsibleTrigger>
-                      <CollapsibleContent className="px-3 pb-3">
-                        <pre className="max-h-80 overflow-auto rounded bg-muted p-3 text-xs">
-                          {formatJson(event.data)}
-                        </pre>
-                      </CollapsibleContent>
-                    </Collapsible>
-                  </div>
-                </CollapsibleContent>
+<CollapsibleContent className="px-4 pb-4">
+                   <div className="grid gap-3">
+                     <Card>
+                       <CardHeader className="pb-2">
+                         <CardTitle className="text-sm">Details</CardTitle>
+                       </CardHeader>
+                       <CardContent>{renderDataTable(event.data)}</CardContent>
+                     </Card>
+                     <Separator />
+                     <Collapsible className="rounded-md border border-border bg-muted">
+                       <CollapsibleTrigger asChild>
+                         <Button
+                           variant="ghost"
+                           size="sm"
+                           className="group w-full justify-between"
+                         >
+                           Raw event payload
+                           <ChevronDown className="size-4 transition-transform group-data-[state=open]:rotate-180" />
+                         </Button>
+                       </CollapsibleTrigger>
+                       <CollapsibleContent className="px-3 pb-3">
+                         <pre className="max-h-80 overflow-auto rounded bg-muted p-3 text-xs">
+                           {formatJson(event.data)}
+                         </pre>
+                       </CollapsibleContent>
+                     </Collapsible>
+                   </div>
+                 </CollapsibleContent>
               </Collapsible>
             )
           })}

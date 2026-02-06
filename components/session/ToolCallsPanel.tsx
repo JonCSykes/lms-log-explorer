@@ -67,11 +67,10 @@ export default function ToolCallsPanel({ toolCalls }: ToolCallsPanelProps) {
         </CardHeader>
         <CardContent className="space-y-3">
           {toolCalls.map((call) => (
-            <Collapsible
-              key={call.id}
-              defaultOpen
-              className="rounded-lg border border-border bg-background"
-            >
+<Collapsible
+               key={call.id}
+               className="rounded-lg border border-border bg-background"
+             >
               <CollapsibleTrigger asChild>
                 <button className="group flex w-full items-start justify-between gap-4 p-4 text-left">
                   <div className="space-y-1">

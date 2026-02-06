@@ -1,6 +1,10 @@
 import * as fs from 'fs';
 import { LogFile, getAllLogFiles } from './discovery';
 import { Session, SessionsListItem } from '../../types/types';
+import { SessionBuilder } from '../parser/sessionBuilder';
+import { readLogFileLines } from '../parser/lineReader';
+
+export type { Session, SessionsListItem };
 
 /**
  * In-memory session index
@@ -75,15 +79,62 @@ export function createEmptyIndex(): SessionIndex {
 }
 
 /**
+ * Parse a single log file and extract session data
+ */
+async function parseLogFile(filePath: string): Promise<Session[]> {
+  const lines = await readLogFileLines(filePath);
+  
+  if (lines.length === 0) return [];
+  
+  const builder = new SessionBuilder();
+  
+  for (const line of lines) {
+    builder.addLine(line);
+  }
+  
+  const sessionData = builder.build();
+  if (!sessionData) return [];
+  
+  // Convert to type Session
+  const toolCalls = sessionData.toolCalls.map((tc, idx) => ({
+    type: 'tool_call' as const,
+    id: tc.id,
+    ts: tc.requestedAt || sessionData.firstSeenAt,
+    toolCallId: tc.id,
+    name: tc.name,
+    argumentsText: tc.argumentsText,
+    argumentsJson: tc.argumentsJson,
+  }));
+  
+  const session: Session = {
+    chatId: sessionData.chatId,
+    model: sessionData.model,
+    firstSeenAt: sessionData.firstSeenAt,
+    request: undefined, // We'll populate this later if needed
+    events: sessionData.events,
+    toolCalls: toolCalls,
+    metrics: sessionData.metrics,
+  };
+  
+  return [session];
+}
+
+/**
  * Build index from log files
  */
-export function buildIndex(logFiles?: LogFile[]): SessionIndex {
+export async function buildIndex(logFiles?: LogFile[]): Promise<SessionIndex> {
   const files = logFiles || getAllLogFiles();
   const index = createEmptyIndex();
   
   for (const file of files) {
     try {
-      // TODO: Actually parse and build sessions
+      const sessions = await parseLogFile(file.path);
+      
+      for (const session of sessions) {
+        addSessionToIndex(index, session);
+      }
+      
+      console.log(`Indexed ${file.path}: ${sessions.length} session(s)`);
     } catch (e) {
       console.error(`Failed to index file: ${file.path}`, e);
     }
@@ -95,6 +146,6 @@ export function buildIndex(logFiles?: LogFile[]): SessionIndex {
 /**
  * Refresh indexed sessions
  */
-export function refreshIndex(logFiles?: LogFile[]): SessionIndex {
+export async function refreshIndex(logFiles?: LogFile[]): Promise<SessionIndex> {
   return buildIndex(logFiles);
 }
