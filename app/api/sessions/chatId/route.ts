@@ -1,10 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
-import * as fs from 'fs';
 import * as path from 'path';
 
-/**
- * Get log root directory from environment
- */
 function getLogRoot(): string {
   const envRoot = process.env.LMS_LOG_ROOT;
   if (envRoot) {
@@ -14,9 +10,6 @@ function getLogRoot(): string {
   return path.join(home, '.lmstudio', 'server-logs');
 }
 
-/**
- * Expand ~ to home directory
- */
 function expandHome(p: string): string {
   if (p.startsWith('~')) {
     const home = process.env.HOME || '';
@@ -25,76 +18,6 @@ function expandHome(p: string): string {
   return p;
 }
 
-/**
- * Session response
- */
-interface SessionResponse {
-  session: SessionItem;
-}
-
-/**
- * Session item with full details
- */
-interface SessionItem {
-  chatId: string;
-  firstSeenAt: string;
-  model?: string;
-  request?: RequestData;
-  events: TimelineEvent[];
-  toolCalls: ToolCallItem[];
-  metrics: SessionMetrics;
-}
-
-/**
- * Request data
- */
-interface RequestData {
-  endpoint: string;
-  method: string;
-  body: Record<string, unknown>;
-}
-
-/**
- * Timeline event
- */
-interface TimelineEvent {
-  id: string;
-  type:
-    | 'request'
-    | 'prompt_progress'
-    | 'stream_chunk'
-    | 'tool_call'
-    | 'usage'
-    | 'stream_finished';
-  ts: string;
-  data?: unknown;
-}
-
-/**
- * Tool call item
- */
-interface ToolCallItem {
-  id: string;
-  name: string;
-  argumentsText: string;
-  argumentsJson?: Record<string, unknown>;
-}
-
-/**
- * Session metrics
- */
-interface SessionMetrics {
-  promptTokens?: number;
-  completionTokens?: number;
-  totalTokens?: number;
-  promptProcessingMs?: number;
-  streamLatencyMs?: number;
-  tokensPerSecond?: number;
-}
-
-/**
- * GET /api/sessions/chatId - Get single session by ID
- */
 export async function GET(request: NextRequest) {
   try {
     const url = new URL(request.url);
@@ -107,25 +30,26 @@ export async function GET(request: NextRequest) {
       );
     }
 
-    // Get log root directory
     const logRoot = getLogRoot();
 
-    if (!fs.existsSync(logRoot)) {
+    if (!require("fs").existsSync(logRoot)) {
       return NextResponse.json(
         { error: `Log directory not found: ${logRoot}` },
         { status: 404 },
       );
     }
 
-    const monthFolders = fs
-      .readdirSync(logRoot, { withFileTypes: true })
+    // Discover month folders
+    const fs = require('fs');
+    const entries: import("fs").Dirent[] = fs.readdirSync(logRoot, { withFileTypes: true });
+    
+    const monthFolders = entries
       .filter((e) => e.isDirectory() && /^\d{4}-\d{2}$/.test(e.name))
-      .map((e) => e.name);
+      .map((e) => e.name)
+      .sort()
+      .reverse();
 
     // Find and parse the session
-    const events: TimelineEvent[] = [];
-    let firstSeenAt = '';
-
     for (const month of monthFolders) {
       const monthPath = path.join(logRoot, month);
 
@@ -133,7 +57,7 @@ export async function GET(request: NextRequest) {
         continue;
       }
 
-      const files = fs.readdirSync(monthPath, { withFileTypes: true });
+      const files: import("fs").Dirent[] = fs.readdirSync(monthPath, { withFileTypes: true });
 
       for (const file of files) {
         if (file.isFile() && file.name.endsWith('.log')) {
@@ -144,63 +68,88 @@ export async function GET(request: NextRequest) {
             const lines = content.split('\n');
 
             for (const line of lines) {
-              // Extract timestamp
-              const tsMatch = line.match(/^\[([^\]]+)\]/);
-              if (!tsMatch) continue;
-
-              const timestamp = `${tsMatch[1]}Z`;
-
               // Check for packet with matching chat ID
               const packetMatch = line.match(/"id":"(chatcmpl-[^"]+)"/);
               if (packetMatch && packetMatch[1] === chatId) {
-                if (!firstSeenAt) {
-                  firstSeenAt = timestamp;
-                }
-
-                // Parse packet JSON
-                const jsonMatch = line.match(/\{[\s\S]*\}/);
-                if (jsonMatch) {
-                  try {
-                    const packet = JSON.parse(jsonMatch[0]);
-
-                    // Extract usage data
-                    if (
-                      packet.choices?.[0]?.finish_reason === '' &&
-                      packet.usage
-                    ) {
+                // Found the session, build response
+                const tsMatch = line.match(/^\[([^\]]+)\]/);
+                
+                // Simple parsing - extract basic info
+                const events = [];
+                let model: string | undefined;
+                
+                for (const logLine of lines) {
+                  const lineTsMatch = logLine.match(/^\[([^\]]+)\]/);
+                  if (!lineTsMatch) continue;
+                  
+                  const ts = `${lineTsMatch[1]}Z`;
+                  
+                  // Check for usage data
+                  const usageMatch = logLine.match(/"usage":\s*{([^}]+)}/);
+                  if (usageMatch) {
+                    try {
+                      const usage = JSON.parse(`{${usageMatch[1]}}`);
                       events.push({
                         id: 'usage',
                         type: 'usage' as const,
-                        ts: timestamp,
-                        data: packet.usage,
+                        ts,
+                        data: usage,
                       });
+                    } catch (e) {
+                      // Skip invalid JSON
                     }
+                  }
 
-                    // Extract tool calls if present
-                    const choice = packet.choices?.[0];
-                    if (choice?.delta?.tool_calls) {
-                      for (const toolCall of choice.delta.tool_calls) {
-                        events.push({
-                          id: toolCall.id,
-                          type: 'tool_call' as const,
-                          ts: timestamp,
-                          data: toolCall,
-                        });
-                      }
-                    }
+                  // Check for tool calls
+                  if (logLine.includes('tool_calls')) {
+                    events.push({
+                      id: 'tool_call',
+                      type: 'tool_call' as const,
+                      ts,
+                      data: null,
+                    });
+                  }
 
-                    // Check for stream finished
-                    if (choice?.finish_reason === 'stop') {
-                      events.push({
-                        id: 'finished',
-                        type: 'stream_finished' as const,
-                        ts: timestamp,
-                      });
-                    }
-                  } catch (e) {
-                    // Skip invalid JSON
+                  // Check for stream finished
+                  if (logLine.includes('Finished streaming response')) {
+                    events.push({
+                      id: 'finished',
+                      type: 'stream_finished' as const,
+                      ts,
+                    });
                   }
                 }
+
+                // Determine model from request or first packet
+                for (const logLine of lines) {
+                  if (logLine.includes('with body')) {
+                    const jsonMatch = logLine.match(/\{[\s\S]*\}/);
+                    if (jsonMatch) {
+                      try {
+                        const body = JSON.parse(jsonMatch[0]);
+                        model = body.model;
+                        break;
+                      } catch (e) {
+                        // Skip
+                      }
+                    }
+                  }
+                }
+
+                return NextResponse.json({
+                  session: {
+                    chatId,
+                    firstSeenAt: tsMatch ? `${tsMatch[1]}Z` : new Date().toISOString(),
+                    model,
+                    events,
+                    toolCalls: [],
+                    metrics: {
+                      promptTokens: undefined,
+                      completionTokens: undefined,
+                      totalTokens: undefined,
+                    },
+                  },
+                });
               }
             }
           } catch (e) {
@@ -208,47 +157,13 @@ export async function GET(request: NextRequest) {
           }
         }
       }
-
-      // If we found the session, stop searching
-      if (events.length > 0) {
-        break;
-      }
     }
 
-    // Build session response
-    if (events.length === 0) {
-      return NextResponse.json(
-        { error: `Session not found: ${chatId}` },
-        { status: 404 },
-      );
-    }
-
-    const sessionResponse: SessionResponse = {
-      session: {
-        chatId,
-        firstSeenAt: firstSeenAt || new Date().toISOString(),
-        model: undefined,
-        request: undefined,
-        events,
-        toolCalls: events
-          .filter((e) => e.type === 'tool_call')
-          .map((e) => ({
-            id: (e.data as { id?: string })?.id || '',
-            name: '',
-            argumentsText: '',
-            argumentsJson: undefined,
-          })),
-        metrics: {
-          promptTokens: undefined,
-          completionTokens: undefined,
-          totalTokens: undefined,
-        },
-      },
-    };
-
-    return NextResponse.json(sessionResponse);
+    return NextResponse.json(
+      { error: `Session not found: ${chatId}` },
+      { status: 404 },
+    );
   } catch (error) {
-    // Log error with chatId if available
     console.error('Error fetching session:', error);
     return NextResponse.json(
       { error: 'Failed to fetch session' },

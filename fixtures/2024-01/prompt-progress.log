@@ -1,0 +1,8 @@
+[2024-01-15 12:00:00][INFO] Received request: POST to /v1/chat/completions with body {"model":"gpt-4","messages":[{"role":"user","content":"Explain quantum physics"}],"stream":true}
+[2024-01-15 12:00:01][INFO] Prompt processing progress: 0%
+[2024-01-15 12:00:02][INFO] Prompt processing progress: 50%
+[2024-01-15 12:00:03][INFO] Prompt processing progress: 100%
+[2024-01-15 12:00:04][INFO] Generated packet: {"id":"chatcmpl-ghi789","object":"chat.completion.chunk","created":1705322404,"model":"gpt-4","choices":[{"index":0,"delta":{"role":"assistant","content":""},"finish_reason":null}]}
+[2024-01-15 12:00:05][INFO] Generated packet: {"id":"chatcmpl-ghi789","object":"chat.completion.chunk","created":1705322405,"model":"gpt-4","choices":[{"index":0,"delta":{"content":"Quantum physics"},"finish_reason":null}]}
+[2024-01-15 12:00:06][INFO] Generated packet: {"id":"chatcmpl-ghi789","object":"chat.completion.chunk","created":1705322406,"model":"gpt-4","choices":[{"index":0,"delta":{"content":" is the branch"},"finish_reason":"","usage":{"prompt_tokens":50,"completion_tokens":12,"total_tokens":62}}]}
+[2024-01-15 12:00:06][INFO] Finished streaming response

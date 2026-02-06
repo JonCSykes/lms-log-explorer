@@ -88,16 +88,17 @@ export class SessionLinker {
   /**
    * Try to correlate a packet with a pending request
    */
-  linkPacket(packet: StreamPacketEvent): CorrelationResult {
-    const { requestEvent, matchedIndex } = correlateRequestToPacket(
-      this.pendingRequests,
-      packet.ts,
-    );
-    
-    const result: CorrelationResult = {
-      sessionchatId: String(packet.data?.packetId || 'unknown'),
-      packet,
-    };
+linkPacket(packet: StreamPacketEvent): CorrelationResult {
+     const { requestEvent, matchedIndex } = correlateRequestToPacket(
+       this.pendingRequests,
+       packet.ts,
+     );
+     
+     const packetData = packet.data as { packetId: string };
+     const result: CorrelationResult = {
+       sessionchatId: String(packetData.packetId || 'unknown'),
+       packet,
+     };
     
     if (requestEvent && matchedIndex !== -1) {
       result.requestEvent = requestEvent;
