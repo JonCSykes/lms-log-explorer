@@ -6,7 +6,11 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "next lint"
+    "lint": "ESLINT_USE_FLAT_CONFIG=false eslint .",
+    "lint:fix": "pnpm lint --fix",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "type-check": "tsc --project tsconfig.json --pretty false"
   },
   "dependencies": {
     "@base-ui/react": "^1.1.0",
@@ -25,15 +29,16 @@
     "tailwind-merge": "^3.4.0"
   },
   "devDependencies": {
+    "@next/eslint-plugin-next": "^14.2.35",
     "@tailwindcss/postcss": "^4.1.18",
     "@types/node": "^20",
     "@types/react": "^19.2.11",
     "@types/react-dom": "^19.2.3",
-    "@typescript-eslint/eslint-plugin": "^8.54.0",
-    "@typescript-eslint/parser": "^8.54.0",
+    "@vercel/style-guide": "^6.0.0",
     "autoprefixer": "^10.4.20",
-    "eslint": "^9.39.2",
+    "eslint": "^8.57.1",
     "postcss": "^8.4.47",
+    "prettier": "^3.8.1",
     "tailwindcss": "^4.0.0",
     "typescript": "^5"
   }

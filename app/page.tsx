@@ -1,33 +1,32 @@
-"use client"
+'use client'
 
-import { useMemo, useState } from "react"
-import { RefreshCw, Settings2 } from "lucide-react"
+import { RefreshCw } from 'lucide-react'
+import { useMemo, useState } from 'react'
 
-import MetricsPanel from "@/components/session/MetricsPanel"
-import TimelinePanel from "@/components/session/TimelinePanel"
-import ToolCallsPanel from "@/components/session/ToolCallsPanel"
-import SessionsSidebar from "@/components/sessions/SessionsSidebar"
-import { Badge } from "@/components/ui/badge"
-import { Button } from "@/components/ui/button"
+import MetricsPanel from '@/components/session/MetricsPanel'
+import TimelinePanel from '@/components/session/TimelinePanel'
+import ToolCallsPanel from '@/components/session/ToolCallsPanel'
+import SessionsSidebar from '@/components/sessions/SessionsSidebar'
+import { Badge } from '@/components/ui/badge'
+import { Button } from '@/components/ui/button'
 import {
   SidebarInset,
   SidebarProvider,
   SidebarTrigger,
-} from "@/components/ui/sidebar"
-import ThemeToggle from "@/components/ui/theme-toggle"
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
-
-import { useSessions } from "@/lib/hooks/useSessions"
-import { useSessionDetails } from "@/lib/hooks/useSessionDetails"
+} from '@/components/ui/sidebar'
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import ThemeToggle from '@/components/ui/theme-toggle'
+import { useSessionDetails } from '@/lib/hooks/useSessionDetails'
+import { useSessions } from '@/lib/hooks/useSessions'
 
 export default function Home() {
   const { sessions, loading: sessionsLoading } = useSessions()
   const [selectedSession, setSelectedSession] = useState<string | undefined>(
     sessions[0]?.chatId
   )
-  
+
   const { data: sessionData, loading: detailsLoading } = useSessionDetails(
-    selectedSession || ""
+    selectedSession || ''
   )
 
   const activeSession = useMemo(
@@ -58,7 +57,11 @@ export default function Home() {
                 </div>
                 <div className="flex items-center gap-2">
                   <Button variant="outline" size="sm" className="gap-2">
-                    {sessionsLoading ? "Loading..." : <RefreshCw className="size-4" />}
+                    {sessionsLoading ? (
+                      'Loading...'
+                    ) : (
+                      <RefreshCw className="size-4" />
+                    )}
                     Refresh
                   </Button>
                   <ThemeToggle />
@@ -97,7 +100,7 @@ export default function Home() {
               </div>
               <div className="flex items-center gap-2">
                 <Button variant="outline" size="sm" className="gap-2">
-                  {isLoading ? "Loading..." : <RefreshCw className="size-4" />}
+                  {isLoading ? 'Loading...' : <RefreshCw className="size-4" />}
                   Refresh
                 </Button>
                 <ThemeToggle />
@@ -107,7 +110,9 @@ export default function Home() {
 
           <main className="flex-1 space-y-4 p-4">
             {isLoading ? (
-              <div className="text-center text-muted-foreground">Loading...</div>
+              <div className="text-center text-muted-foreground">
+                Loading...
+              </div>
             ) : sessionData ? (
               <Tabs defaultValue="timeline" className="space-y-4">
                 <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-border bg-card px-4 py-3">
@@ -117,9 +122,9 @@ export default function Home() {
                     <TabsTrigger value="metrics">Metrics</TabsTrigger>
                   </TabsList>
                   <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-                    {sessionData.model && (
+                    {sessionData.model ? (
                       <Badge variant="secondary">{sessionData.model}</Badge>
-                    )}
+                    ) : null}
                     {sessionData.metrics.promptTokens !== undefined && (
                       <Badge variant="outline">
                         {sessionData.metrics.promptTokens} Input Tokens

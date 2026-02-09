@@ -1,168 +1,185 @@
-import { SessionLinker } from './sessionLinker';
-import { ToolCallMerger } from './toolCalls';
-import { TimingTracker, UsageTracker } from './metrics';
-import { LogLine } from './lineReader';
-import { ParserEvent, classifyLogLine, RequestReceivedEvent, StreamPacketEvent } from './events';
+import {
+  type ParserEvent,
+  type RequestReceivedEvent,
+  type StreamPacketEvent,
+  classifyLogLine,
+} from './events'
+import { type LogLine } from './lineReader'
+import { TimingTracker, UsageTracker } from './metrics'
+import { SessionLinker } from './sessionLinker'
+import { ToolCallMerger } from './toolCalls'
 
 /**
  * Aggregated session data
  */
 export interface SessionData {
-  chatId: string;
-  model?: string;
-  firstSeenAt: string;
-  request?: RequestReceivedEvent;
-  events: TimelineEvent[];
-  toolCalls: ToolCallData[];
-  metrics: SessionMetrics;
+  chatId: string
+  model?: string
+  firstSeenAt: string
+  request?: RequestReceivedEvent
+  events: TimelineEvent[]
+  toolCalls: ToolCallData[]
+  metrics: SessionMetrics
 }
 
 /**
  * Normalized timeline event (aggregated from parser events)
  */
 export interface TimelineEvent {
-  id: string;
-  type: 'request' | 'prompt_progress' | 'stream_chunk' | 'tool_call' | 'usage' | 'stream_finished';
-  ts: string;
-  data?: unknown;
+  id: string
+  type:
+    | 'request'
+    | 'prompt_progress'
+    | 'stream_chunk'
+    | 'tool_call'
+    | 'usage'
+    | 'stream_finished'
+  ts: string
+  data?: unknown
 }
 
 /**
  * Tool call data with aggregated arguments
  */
 export interface ToolCallData {
-  id: string;
-  name: string;
-  argumentsText: string;
-  argumentsJson?: Record<string, unknown>;
-  requestedAt?: string;
+  id: string
+  name: string
+  argumentsText: string
+  argumentsJson?: Record<string, unknown>
+  requestedAt?: string
 }
 
 /**
  * Session metrics with computed values
  */
 export interface SessionMetrics {
-  promptTokens?: number;
-  completionTokens?: number;
-  totalTokens?: number;
-  promptProcessingMs?: number;
-  streamLatencyMs?: number;
-  tokensPerSecond?: number;
+  promptTokens?: number
+  completionTokens?: number
+  totalTokens?: number
+  promptProcessingMs?: number
+  streamLatencyMs?: number
+  tokensPerSecond?: number
 }
 
 /**
  * Build a session from parsed parser events
  */
 export class SessionBuilder {
-  private chatId?: string;
-  private model?: string;
-  private firstSeenAt = '';
-  private requestEvent?: RequestReceivedEvent;
-  private timelineEvents: TimelineEvent[] = [];
-  private toolCallMerger = new ToolCallMerger();
-  private usageTracker = new UsageTracker();
-  private timingTracker = new TimingTracker();
-  private sessionLinker = new SessionLinker();
+  private chatId?: string
+  private model?: string
+  private firstSeenAt = ''
+  private requestEvent?: RequestReceivedEvent
+  private timelineEvents: TimelineEvent[] = []
+  private toolCallMerger = new ToolCallMerger()
+  private usageTracker = new UsageTracker()
+  private timingTracker = new TimingTracker()
+  private sessionLinker = new SessionLinker()
 
   addLine(line: LogLine): void {
-    const event = classifyLogLine(line);
-    if (!event) return;
+    const event = classifyLogLine(line)
+    if (!event) return
 
     switch (event.type) {
       case 'request_received':
-        this.handleRequestReceived(event as RequestReceivedEvent);
-        break;
+        this.handleRequestReceived(event as RequestReceivedEvent)
+        break
       case 'prompt_progress':
-        this.handlePromptProgress(event, line.ts);
-        break;
+        this.handlePromptProgress(event, line.ts)
+        break
       case 'stream_packet':
-        this.handleStreamPacket(event as StreamPacketEvent, line.ts);
-        break;
+        this.handleStreamPacket(event as StreamPacketEvent, line.ts)
+        break
       case 'stream_finished':
-        this.handleStreamFinished(line.ts);
-        break;
+        this.handleStreamFinished(line.ts)
+        break
+      case 'parser_error':
+        // Skip malformed lines and continue building session data.
+        break
     }
   }
 
   private handleRequestReceived(event: RequestReceivedEvent): void {
-    this.requestEvent = event;
-    
-    const body = event.data.body as { model?: string };
+    this.requestEvent = event
+
+    const body = event.data.body as { model?: string }
     if (body.model) {
-      this.model = body.model;
+      this.model = body.model
     }
 
-    this.sessionLinker.addRequest(event);
+    this.sessionLinker.addRequest(event)
   }
 
   private handlePromptProgress(event: ParserEvent, ts: string): void {
-    const percent = (event.data as { percent: number }).percent;
+    const percent = (event.data as { percent: number }).percent
     this.timelineEvents.push({
       id: `prompt-${ts}`,
       type: 'prompt_progress',
       ts,
       data: { percent },
-    });
+    })
 
-    this.timingTracker.recordPromptProgress(ts);
+    this.timingTracker.recordPromptProgress(ts)
   }
 
   private handleStreamPacket(event: StreamPacketEvent, ts: string): void {
-    const packetData = event.data;
-    const packetId = packetData.packetId;
+    const packetData = event.data
+    const packetId = packetData.packetId
 
     if (!this.firstSeenAt) {
-      this.firstSeenAt = ts;
+      this.firstSeenAt = ts
     }
 
     const packetEvent: StreamPacketEvent = {
       type: 'stream_packet',
       ts,
       data: { packetId, rawJson: packetData.rawJson },
-    };
+    }
 
-    const correlation = this.sessionLinker.linkPacket(packetEvent);
-    
+    const correlation = this.sessionLinker.linkPacket(packetEvent)
+
     if (!this.chatId) {
-      this.chatId = correlation.sessionchatId;
+      this.chatId = correlation.sessionchatId
       if (correlation.requestEvent) {
-        this.requestEvent = correlation.requestEvent;
+        this.requestEvent = correlation.requestEvent
       }
     }
 
     if (packetData.rawJson) {
       try {
-        const rawPacket = JSON.parse(packetData.rawJson);
+        const rawPacket = JSON.parse(packetData.rawJson)
 
         if (this.model === undefined && rawPacket.model) {
-          this.model = rawPacket.model;
+          this.model = rawPacket.model
         }
 
-        this.usageTracker.update(rawPacket.usage || {});
-        this.timingTracker.recordFirstPacket(ts);
-        this.timingTracker.recordLastPacket(ts);
+        this.usageTracker.update(rawPacket.usage || {})
+        this.timingTracker.recordFirstPacket(ts)
+        this.timingTracker.recordLastPacket(ts)
 
-        const choice = rawPacket.choices?.[0];
-        
+        const choice = rawPacket.choices?.[0]
+
         if (choice?.delta?.content) {
           this.timelineEvents.push({
             id: `chunk-${packetId}-${ts}`,
             type: 'stream_chunk',
             ts,
             data: { content: choice.delta.content },
-          });
+          })
         }
 
         if (choice?.delta?.tool_calls) {
           for (const delta of choice.delta.tool_calls) {
-            this.toolCallMerger.addDelta(delta, ts);
+            this.toolCallMerger.addDelta(delta, ts)
+            const deltaId = String(
+              typeof delta.id === 'string' ? delta.id : `${packetId}-${ts}`
+            )
 
             this.timelineEvents.push({
-              id: `tool-${delta.id}`,
+              id: `tool-${deltaId}`,
               type: 'tool_call',
               ts,
               data: delta,
-            });
+            })
           }
         }
 
@@ -172,7 +189,7 @@ export class SessionBuilder {
             type: 'usage',
             ts,
             data: rawPacket.usage,
-          });
+          })
         }
 
         if (choice?.finish_reason === 'stop') {
@@ -180,7 +197,7 @@ export class SessionBuilder {
             id: 'stream-finished',
             type: 'stream_finished',
             ts,
-          });
+          })
         }
       } catch (e) {
         // Skip malformed JSON in packet
@@ -193,22 +210,22 @@ export class SessionBuilder {
       id: 'stream-finished',
       type: 'stream_finished',
       ts,
-    });
+    })
   }
 
   build(): SessionData | null {
-    if (!this.chatId) return null;
+    if (!this.chatId) return null
 
     const toolCalls = this.toolCallMerger.getToolCalls().map((tc) => {
-      const argumentsJson = parseToolCallArguments(tc.argumentsText);
+      const argumentsJson = parseToolCallArguments(tc.argumentsText)
       return {
         id: tc.id,
         name: tc.name || 'unknown',
         argumentsText: tc.argumentsText,
         argumentsJson: argumentsJson ?? undefined,
         requestedAt: tc.firstSeenAt,
-      };
-    });
+      }
+    })
 
     const metrics = {
       promptTokens: this.usageTracker.getMetrics().promptTokens,
@@ -219,7 +236,7 @@ export class SessionBuilder {
       tokensPerSecond: this.timingTracker.computeTokensPerSecond(
         this.usageTracker.getMetrics().completionTokens
       ),
-    };
+    }
 
     return {
       chatId: this.chatId,
@@ -229,16 +246,18 @@ export class SessionBuilder {
       events: this.timelineEvents,
       toolCalls,
       metrics,
-    };
+    }
   }
 }
 
-function parseToolCallArguments(text: string): Record<string, unknown> | undefined {
-  if (!text.trim()) return undefined;
-  
+function parseToolCallArguments(
+  text: string
+): Record<string, unknown> | undefined {
+  if (!text.trim()) return undefined
+
   try {
-    return JSON.parse(text);
+    return JSON.parse(text)
   } catch {
-    return undefined;
+    return undefined
   }
 }

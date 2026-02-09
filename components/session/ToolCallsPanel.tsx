@@ -1,47 +1,47 @@
-"use client"
+'use client'
 
-import { ChevronDown } from "lucide-react"
+import { ChevronDown } from 'lucide-react'
 
-import { Badge } from "@/components/ui/badge"
-import { Button } from "@/components/ui/button"
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
+import { Badge } from '@/components/ui/badge'
+import { Button } from '@/components/ui/button'
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import {
   Collapsible,
   CollapsibleContent,
   CollapsibleTrigger,
-} from "@/components/ui/collapsible"
-import { Separator } from "@/components/ui/separator"
+} from '@/components/ui/collapsible'
+import { Separator } from '@/components/ui/separator'
 import {
   Table,
   TableBody,
   TableCell,
   TableHead,
   TableRow,
-} from "@/components/ui/table"
+} from '@/components/ui/table'
 
 interface ToolCall {
-  id: string;
-  name: string;
-  argumentsText: string;
-  argumentsJson?: Record<string, unknown>;
-  requestedAt?: string;
-  durationMs?: number;
+  id: string
+  name: string
+  argumentsText: string
+  argumentsJson?: Record<string, unknown>
+  requestedAt?: string
+  durationMs?: number
 }
 
 interface ToolCallsPanelProps {
-  toolCalls: ToolCall[];
+  toolCalls: ToolCall[]
 }
 
 export default function ToolCallsPanel({ toolCalls }: ToolCallsPanelProps) {
   const formatTimestamp = (value?: string) => {
-    if (!value) return "Unknown"
+    if (!value) return 'Unknown'
     const date = new Date(value)
     if (Number.isNaN(date.getTime())) return value
     return date.toLocaleString()
   }
 
   const formatDuration = (value?: number) => {
-    if (value === undefined || value === null) return "Unknown"
+    if (value === undefined) return 'Unknown'
     if (value < 1000) return `${value}ms`
     return `${(value / 1000).toFixed(2)}s`
   }
@@ -67,12 +67,15 @@ export default function ToolCallsPanel({ toolCalls }: ToolCallsPanelProps) {
         </CardHeader>
         <CardContent className="space-y-3">
           {toolCalls.map((call) => (
-<Collapsible
-               key={call.id}
-               className="rounded-lg border border-border bg-background"
-             >
+            <Collapsible
+              key={call.id}
+              className="rounded-lg border border-border bg-background"
+            >
               <CollapsibleTrigger asChild>
-                <button className="group flex w-full items-start justify-between gap-4 p-4 text-left">
+                <button
+                  type="button"
+                  className="group flex w-full items-start justify-between gap-4 p-4 text-left"
+                >
                   <div className="space-y-1">
                     <div className="flex items-center gap-2">
                       <span className="text-sm font-semibold">{call.name}</span>
@@ -102,11 +105,15 @@ export default function ToolCallsPanel({ toolCalls }: ToolCallsPanelProps) {
                           </TableRow>
                           <TableRow>
                             <TableHead>Requested At</TableHead>
-                            <TableCell>{formatTimestamp(call.requestedAt)}</TableCell>
+                            <TableCell>
+                              {formatTimestamp(call.requestedAt)}
+                            </TableCell>
                           </TableRow>
                           <TableRow>
                             <TableHead>Duration</TableHead>
-                            <TableCell>{formatDuration(call.durationMs)}</TableCell>
+                            <TableCell>
+                              {formatDuration(call.durationMs)}
+                            </TableCell>
                           </TableRow>
                         </TableBody>
                       </Table>
@@ -128,7 +135,7 @@ export default function ToolCallsPanel({ toolCalls }: ToolCallsPanelProps) {
                                     {key}
                                   </TableHead>
                                   <TableCell className="font-mono text-xs">
-                                    {typeof value === "object"
+                                    {typeof value === 'object'
                                       ? JSON.stringify(value, null, 2)
                                       : String(value)}
                                   </TableCell>
@@ -156,7 +163,7 @@ export default function ToolCallsPanel({ toolCalls }: ToolCallsPanelProps) {
                         </CollapsibleTrigger>
                         <CollapsibleContent className="px-3 pb-3">
                           <pre className="max-h-72 overflow-auto rounded bg-muted p-3 text-xs">
-                            {call.argumentsText || "No arguments provided."}
+                            {call.argumentsText || 'No arguments provided.'}
                           </pre>
                         </CollapsibleContent>
                       </Collapsible>

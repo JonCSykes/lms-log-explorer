@@ -1,11 +1,11 @@
-"use client"
+'use client'
 
-import { useMemo, useState } from "react"
-import { MessageSquare, RefreshCw, Search, Sparkles } from "lucide-react"
+import { MessageSquare, RefreshCw, Search, Sparkles } from 'lucide-react'
+import { useMemo, useState } from 'react'
 
-import { Badge } from "@/components/ui/badge"
-import { Button } from "@/components/ui/button"
-import { Input } from "@/components/ui/input"
+import { Badge } from '@/components/ui/badge'
+import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
 import {
   Sidebar,
   SidebarContent,
@@ -17,44 +17,44 @@ import {
   SidebarMenuButton,
   SidebarMenuItem,
   SidebarRail,
-} from "@/components/ui/sidebar"
+} from '@/components/ui/sidebar'
 
 interface Session {
-   chatId: string;
-   firstSeenAt: string;
-   model?: string;
- }
+  chatId: string
+  firstSeenAt: string
+  model?: string
+}
 
 interface SessionsSidebarProps {
-  sessions: Session[];
-  selectedChatId?: string;
-  onSelectSession: (chatId: string) => void;
-  onRefresh?: () => void;
+  sessions: Session[]
+  selectedChatId?: string
+  onSelectSession: (chatId: string) => void
+  onRefresh?: () => void
 }
 
 export default function SessionsSidebar({
-   sessions,
-   selectedChatId,
-   onSelectSession,
-   onRefresh,
- }: SessionsSidebarProps) {
-   const [searchQuery, setSearchQuery] = useState("")
+  sessions,
+  selectedChatId,
+  onSelectSession,
+  onRefresh,
+}: SessionsSidebarProps) {
+  const [searchQuery, setSearchQuery] = useState('')
 
-   const filteredSessions = useMemo(() => {
-     const query = searchQuery.trim().toLowerCase()
-     if (!query) return sessions
-     return sessions.filter((session) =>
-       session.chatId.toLowerCase().includes(query)
-     )
-   }, [searchQuery, sessions])
+  const filteredSessions = useMemo(() => {
+    const query = searchQuery.trim().toLowerCase()
+    if (!query) return sessions
+    return sessions.filter((session) =>
+      session.chatId.toLowerCase().includes(query)
+    )
+  }, [searchQuery, sessions])
 
-   const formatTimestamp = (value: string) => {
-     const date = new Date(value)
-     if (Number.isNaN(date.getTime())) return value
-     return date.toLocaleString()
-   }
+  const formatTimestamp = (value: string) => {
+    const date = new Date(value)
+    if (Number.isNaN(date.getTime())) return value
+    return date.toLocaleString()
+  }
 
-   return (
+  return (
     <Sidebar collapsible="icon">
       <SidebarHeader className="gap-3 px-3 py-3">
         <div className="flex items-center gap-2">
@@ -94,28 +94,31 @@ export default function SessionsSidebar({
             <SidebarMenu>
               {filteredSessions.map((session) => (
                 <SidebarMenuItem key={session.chatId}>
-                    <SidebarMenuButton
-                     isActive={selectedChatId === session.chatId}
-                     onClick={() => onSelectSession(session.chatId)}
-                     className="px-3 group-data-[collapsible=icon]/sidebar-wrapper:justify-center"
-                   >
-                     <MessageSquare className="mt-1 size-4 text-muted-foreground" />
-                        <div className="flex w-full flex-col gap-1 group-data-[collapsible=icon]/sidebar-wrapper:hidden">
-                        <div className="flex items-center justify-between gap-2">
-                          <span className="truncate font-medium text-sm text-left">
-                            {session.chatId}
-                          </span>
-                          {session.model && (
-                            <Badge variant="outline" className="text-[10px] whitespace-nowrap px-2">
-                              {session.model}
-                            </Badge>
-                          )}
-                        </div>
-                        <span className="text-xs text-muted-foreground whitespace-nowrap text-left">
-                          {formatTimestamp(session.firstSeenAt)}
+                  <SidebarMenuButton
+                    isActive={selectedChatId === session.chatId}
+                    onClick={() => onSelectSession(session.chatId)}
+                    className="px-3 group-data-[collapsible=icon]/sidebar-wrapper:justify-center"
+                  >
+                    <MessageSquare className="mt-1 size-4 text-muted-foreground" />
+                    <div className="flex w-full flex-col gap-1 group-data-[collapsible=icon]/sidebar-wrapper:hidden">
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="truncate font-medium text-sm text-left">
+                          {session.chatId}
                         </span>
+                        {session.model ? (
+                          <Badge
+                            variant="outline"
+                            className="text-[10px] whitespace-nowrap px-2"
+                          >
+                            {session.model}
+                          </Badge>
+                        ) : null}
                       </div>
-                   </SidebarMenuButton>
+                      <span className="text-xs text-muted-foreground whitespace-nowrap text-left">
+                        {formatTimestamp(session.firstSeenAt)}
+                      </span>
+                    </div>
+                  </SidebarMenuButton>
                 </SidebarMenuItem>
               ))}
             </SidebarMenu>

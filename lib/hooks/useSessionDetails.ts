@@ -62,12 +62,14 @@ export function useSessionDetails(chatId: string) {
     async function fetchSession() {
       try {
         setLoading(true)
-        const response = await fetch(`/api/sessions/chatId?chatId=${encodeURIComponent(chatId)}`)
-        
+        const response = await fetch(
+          `/api/sessions/chatId?chatId=${encodeURIComponent(chatId)}`
+        )
+
         if (!response.ok) {
           throw new Error('Failed to fetch session details')
         }
-        
+
         const result: SessionResponse = await response.json()
         setData(result.session)
       } catch (err) {
@@ -77,7 +79,7 @@ export function useSessionDetails(chatId: string) {
       }
     }
 
-    fetchSession()
+    void fetchSession()
   }, [chatId])
 
   return { data, loading, error }

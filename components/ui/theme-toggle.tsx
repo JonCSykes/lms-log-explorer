@@ -1,9 +1,9 @@
-"use client"
+'use client'
 
-import { Moon, Sun } from "lucide-react"
-import { useEffect, useState } from "react"
+import { Moon, Sun } from 'lucide-react'
+import { useEffect, useState } from 'react'
 
-import { Button } from "@/components/ui/button"
+import { Button } from '@/components/ui/button'
 
 export default function ThemeToggle() {
   const [mounted, setMounted] = useState(false)
@@ -11,18 +11,20 @@ export default function ThemeToggle() {
 
   useEffect(() => {
     setMounted(true)
-    const stored = window.localStorage.getItem("theme")
-    const prefersDark = window.matchMedia("(prefers-color-scheme: dark)").matches
-    const shouldBeDark = stored ? stored === "dark" : prefersDark
+    const stored = window.localStorage.getItem('theme')
+    const prefersDark = window.matchMedia(
+      '(prefers-color-scheme: dark)'
+    ).matches
+    const shouldBeDark = stored ? stored === 'dark' : prefersDark
     setIsDark(shouldBeDark)
-    document.documentElement.classList.toggle("dark", shouldBeDark)
+    document.documentElement.classList.toggle('dark', shouldBeDark)
   }, [])
 
   const toggleTheme = () => {
     const next = !isDark
     setIsDark(next)
-    document.documentElement.classList.toggle("dark", next)
-    window.localStorage.setItem("theme", next ? "dark" : "light")
+    document.documentElement.classList.toggle('dark', next)
+    window.localStorage.setItem('theme', next ? 'dark' : 'light')
   }
 
   if (!mounted) {
@@ -37,7 +39,7 @@ export default function ThemeToggle() {
   return (
     <Button variant="outline" size="sm" className="gap-2" onClick={toggleTheme}>
       {isDark ? <Moon className="size-4" /> : <Sun className="size-4" />}
-      {isDark ? "Dark" : "Light"}
+      {isDark ? 'Dark' : 'Light'}
     </Button>
   )
 }

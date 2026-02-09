@@ -31,13 +31,13 @@ export function useSessions() {
       try {
         setLoading(true)
         const response = await fetch('/api/sessions')
-        
+
         if (!response.ok) {
           throw new Error('Failed to fetch sessions')
         }
-        
+
         const data: SessionsResponse = await response.json()
-        
+
         setSessions(
           data.sessions.map((s) => ({
             chatId: s.chatId,
@@ -52,7 +52,7 @@ export function useSessions() {
       }
     }
 
-    fetchSessions()
+    void fetchSessions()
   }, [])
 
   return { sessions, loading, error }

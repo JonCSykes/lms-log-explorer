@@ -1,14 +1,14 @@
-import type { ReactNode } from 'react';
-import './globals.css';
-import { Inter } from "next/font/google";
+import { Inter } from 'next/font/google'
+import type { ReactNode } from 'react'
 
-const inter = Inter({subsets:['latin'],variable:'--font-sans'});
+import './globals.css'
 
+const inter = Inter({ subsets: ['latin'], variable: '--font-sans' })
 
 export default function RootLayout({ children }: { children: ReactNode }) {
   return (
     <html lang="en" className={inter.variable}>
       <body>{children}</body>
     </html>
-  );
+  )
 }

@@ -1,10 +1,10 @@
-"use client";
+'use client'
 
-import { ReactNode } from "react";
-import Link from "next/link";
+import Link from 'next/link'
+import { type ReactNode } from 'react'
 
 interface AppShellProps {
-  children: ReactNode;
+  children: ReactNode
 }
 
 export default function AppShell({ children }: AppShellProps) {
@@ -25,5 +25,5 @@ export default function AppShell({ children }: AppShellProps) {
       {/* Main Content */}
       <main className="flex-1 overflow-hidden">{children}</main>
     </div>
-  );
+  )
 }

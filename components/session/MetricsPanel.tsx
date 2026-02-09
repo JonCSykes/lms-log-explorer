@@ -1,50 +1,50 @@
-"use client"
+'use client'
 
-import { ChevronDown } from "lucide-react"
+import { ChevronDown } from 'lucide-react'
 
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import {
   Collapsible,
   CollapsibleContent,
   CollapsibleTrigger,
-} from "@/components/ui/collapsible"
+} from '@/components/ui/collapsible'
 import {
   Table,
   TableBody,
   TableCell,
   TableHead,
   TableRow,
-} from "@/components/ui/table"
+} from '@/components/ui/table'
 
 interface SessionMetrics {
-  promptTokens?: number;
-  completionTokens?: number;
-  totalTokens?: number;
-  promptProcessingMs?: number;
-  streamLatencyMs?: number;
-  tokensPerSecond?: number;
+  promptTokens?: number
+  completionTokens?: number
+  totalTokens?: number
+  promptProcessingMs?: number
+  streamLatencyMs?: number
+  tokensPerSecond?: number
 }
 
 interface MetricsPanelProps {
-  metrics: SessionMetrics;
+  metrics: SessionMetrics
 }
 
 export default function MetricsPanel({ metrics }: MetricsPanelProps) {
   const formatNumber = (num?: number) => {
-    if (num === undefined || num === null) return "Unknown";
-    return num.toLocaleString();
-  };
+    if (num === undefined) return 'Unknown'
+    return num.toLocaleString()
+  }
 
   const formatDuration = (ms?: number) => {
-    if (ms === undefined || ms === null) return "Unknown";
-    const seconds = (ms / 1000).toFixed(2);
-    return `${seconds}s`;
-  };
+    if (ms === undefined) return 'Unknown'
+    const seconds = (ms / 1000).toFixed(2)
+    return `${seconds}s`
+  }
 
   const formatTokensPerSecond = (tps?: number) => {
-    if (tps === undefined || tps === null) return "Unknown";
-    return tps.toFixed(2);
-  };
+    if (tps === undefined) return 'Unknown'
+    return tps.toFixed(2)
+  }
 
   return (
     <div className="space-y-4">
@@ -55,7 +55,10 @@ export default function MetricsPanel({ metrics }: MetricsPanelProps) {
         <CardContent className="space-y-3">
           <Collapsible defaultOpen className="rounded-lg border border-border">
             <CollapsibleTrigger asChild>
-              <button className="group flex w-full items-center justify-between gap-2 p-4 text-left">
+              <button
+                type="button"
+                className="group flex w-full items-center justify-between gap-2 p-4 text-left"
+              >
                 <div>
                   <div className="text-sm font-semibold">Token Usage</div>
                   <div className="text-xs text-muted-foreground">
@@ -76,12 +79,12 @@ export default function MetricsPanel({ metrics }: MetricsPanelProps) {
                   <TableBody>
                     <TableRow>
                       <TableHead className="w-1/3">Prompt Tokens</TableHead>
-                      <TableCell>{formatNumber(metrics.promptTokens)}</TableCell>
+                      <TableCell>
+                        {formatNumber(metrics.promptTokens)}
+                      </TableCell>
                     </TableRow>
                     <TableRow>
-                      <TableHead className="w-1/3">
-                        Completion Tokens
-                      </TableHead>
+                      <TableHead className="w-1/3">Completion Tokens</TableHead>
                       <TableCell>
                         {formatNumber(metrics.completionTokens)}
                       </TableCell>
@@ -98,7 +101,10 @@ export default function MetricsPanel({ metrics }: MetricsPanelProps) {
 
           <Collapsible defaultOpen className="rounded-lg border border-border">
             <CollapsibleTrigger asChild>
-              <button className="group flex w-full items-center justify-between gap-2 p-4 text-left">
+              <button
+                type="button"
+                className="group flex w-full items-center justify-between gap-2 p-4 text-left"
+              >
                 <div>
                   <div className="text-sm font-semibold">
                     Timing & Throughput
@@ -115,7 +121,9 @@ export default function MetricsPanel({ metrics }: MetricsPanelProps) {
                 <TableBody>
                   <TableRow>
                     <TableHead className="w-1/3">Stream Latency</TableHead>
-                    <TableCell>{formatDuration(metrics.streamLatencyMs)}</TableCell>
+                    <TableCell>
+                      {formatDuration(metrics.streamLatencyMs)}
+                    </TableCell>
                   </TableRow>
                   <TableRow>
                     <TableHead className="w-1/3">Tokens / Second</TableHead>

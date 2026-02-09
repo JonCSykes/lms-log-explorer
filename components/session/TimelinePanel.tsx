@@ -1,39 +1,39 @@
-"use client"
+'use client'
 
-import { ChevronDown } from "lucide-react"
+import { ChevronDown } from 'lucide-react'
 
-import { Badge } from "@/components/ui/badge"
-import { Button } from "@/components/ui/button"
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
+import { Badge } from '@/components/ui/badge'
+import { Button } from '@/components/ui/button'
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import {
   Collapsible,
   CollapsibleContent,
   CollapsibleTrigger,
-} from "@/components/ui/collapsible"
-import { Separator } from "@/components/ui/separator"
+} from '@/components/ui/collapsible'
+import { Separator } from '@/components/ui/separator'
 import {
   Table,
   TableBody,
   TableCell,
   TableHead,
   TableRow,
-} from "@/components/ui/table"
+} from '@/components/ui/table'
 
 interface TimelineEvent {
-  id: string;
+  id: string
   type:
     | 'request'
     | 'prompt_progress'
     | 'stream_chunk'
     | 'tool_call'
     | 'usage'
-    | 'stream_finished';
-  ts: string;
-  data?: unknown;
+    | 'stream_finished'
+  ts: string
+  data?: unknown
 }
 
 interface TimelinePanelProps {
-  events: TimelineEvent[];
+  events: TimelineEvent[]
 }
 
 export default function TimelinePanel({ events }: TimelinePanelProps) {
@@ -50,8 +50,8 @@ export default function TimelinePanel({ events }: TimelinePanelProps) {
   }
 
   const formatJson = (data?: unknown) => {
-    if (data === undefined) return "No payload available."
-    if (typeof data === "string") return data
+    if (data === undefined) return 'No payload available.'
+    if (typeof data === 'string') return data
     try {
       return JSON.stringify(data, null, 2)
     } catch {
@@ -60,7 +60,7 @@ export default function TimelinePanel({ events }: TimelinePanelProps) {
   }
 
   const renderDataTable = (data?: unknown) => {
-    if (!data || typeof data !== "object") {
+    if (!data || typeof data !== 'object') {
       return (
         <p className="text-sm text-muted-foreground">
           No structured data available.
@@ -84,7 +84,7 @@ export default function TimelinePanel({ events }: TimelinePanelProps) {
             <TableRow key={key}>
               <TableHead className="w-1/3">{key}</TableHead>
               <TableCell className="font-mono text-xs">
-                {typeof value === "object"
+                {typeof value === 'object'
                   ? JSON.stringify(value, null, 2)
                   : String(value)}
               </TableCell>
@@ -95,13 +95,13 @@ export default function TimelinePanel({ events }: TimelinePanelProps) {
     )
   }
 
-  const eventLabels: Record<TimelineEvent["type"], string> = {
-    request: "Request Received",
-    prompt_progress: "Prompt Progress",
-    stream_chunk: "Stream Chunk",
-    tool_call: "Tool Call Requested",
-    usage: "Usage Summary",
-    stream_finished: "Stream Finished",
+  const eventLabels: Record<TimelineEvent['type'], string> = {
+    request: 'Request Received',
+    prompt_progress: 'Prompt Progress',
+    stream_chunk: 'Stream Chunk',
+    tool_call: 'Tool Call Requested',
+    usage: 'Usage Summary',
+    stream_finished: 'Stream Finished',
   }
 
   return (
@@ -117,13 +117,16 @@ export default function TimelinePanel({ events }: TimelinePanelProps) {
               ? formatDuration(event.ts, nextEvent.ts)
               : undefined
 
-return (
-               <Collapsible
-                 key={event.id}
-                 className="rounded-lg border border-border bg-background"
-               >
+            return (
+              <Collapsible
+                key={event.id}
+                className="rounded-lg border border-border bg-background"
+              >
                 <CollapsibleTrigger asChild>
-                  <button className="group flex w-full items-start justify-between gap-4 p-4 text-left">
+                  <button
+                    type="button"
+                    className="group flex w-full items-start justify-between gap-4 p-4 text-left"
+                  >
                     <div className="space-y-1">
                       <div className="flex items-center gap-2">
                         <Badge variant="outline">{event.type}</Badge>
@@ -136,39 +139,39 @@ return (
                       </div>
                     </div>
                     <div className="flex items-center gap-3 text-xs text-muted-foreground">
-                      {duration && <span>+{duration}</span>}
+                      {duration ? <span>+{duration}</span> : null}
                       <ChevronDown className="size-4 transition-transform group-data-[state=open]:rotate-180" />
                     </div>
                   </button>
                 </CollapsibleTrigger>
-<CollapsibleContent className="px-4 pb-4">
-                   <div className="grid gap-3">
-                     <Card>
-                       <CardHeader className="pb-2">
-                         <CardTitle className="text-sm">Details</CardTitle>
-                       </CardHeader>
-                       <CardContent>{renderDataTable(event.data)}</CardContent>
-                     </Card>
-                     <Separator />
-                     <Collapsible className="rounded-md border border-border bg-muted">
-                       <CollapsibleTrigger asChild>
-                         <Button
-                           variant="ghost"
-                           size="sm"
-                           className="group w-full justify-between"
-                         >
-                           Raw event payload
-                           <ChevronDown className="size-4 transition-transform group-data-[state=open]:rotate-180" />
-                         </Button>
-                       </CollapsibleTrigger>
-                       <CollapsibleContent className="px-3 pb-3">
-                         <pre className="max-h-80 overflow-auto rounded bg-muted p-3 text-xs">
-                           {formatJson(event.data)}
-                         </pre>
-                       </CollapsibleContent>
-                     </Collapsible>
-                   </div>
-                 </CollapsibleContent>
+                <CollapsibleContent className="px-4 pb-4">
+                  <div className="grid gap-3">
+                    <Card>
+                      <CardHeader className="pb-2">
+                        <CardTitle className="text-sm">Details</CardTitle>
+                      </CardHeader>
+                      <CardContent>{renderDataTable(event.data)}</CardContent>
+                    </Card>
+                    <Separator />
+                    <Collapsible className="rounded-md border border-border bg-muted">
+                      <CollapsibleTrigger asChild>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="group w-full justify-between"
+                        >
+                          Raw event payload
+                          <ChevronDown className="size-4 transition-transform group-data-[state=open]:rotate-180" />
+                        </Button>
+                      </CollapsibleTrigger>
+                      <CollapsibleContent className="px-3 pb-3">
+                        <pre className="max-h-80 overflow-auto rounded bg-muted p-3 text-xs">
+                          {formatJson(event.data)}
+                        </pre>
+                      </CollapsibleContent>
+                    </Collapsible>
+                  </div>
+                </CollapsibleContent>
               </Collapsible>
             )
           })}

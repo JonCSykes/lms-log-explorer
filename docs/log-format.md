@@ -17,11 +17,13 @@ Each log line follows this pattern:
 ## Known Line Types
 
 ### 1. Request Receipt
+
 Indicates a new API request has been received:
 
     [2024-01-15 10:30:00][INFO] Received request: POST to /v1/chat/completions with body { ... }
 
 Contains:
+
 - HTTP method: `POST`
 - Endpoint: `/v1/chat/completions`
 - Full JSON request body with:
@@ -33,20 +35,24 @@ Contains:
   - Optional `tools` array
 
 ### 2. Prompt Processing Progress
+
 Indicates prompt processing progress:
 
     [2024-01-15 10:30:00][INFO] Prompt processing progress: X%
 
 Contains:
+
 - Percentage value (0, 50, 100)
 - Used to calculate prompt processing time
 
 ### 3. Generated Packet
+
 Streaming response packet:
 
     [2024-01-15 10:30:01][INFO] Generated packet: { ... }
 
 Contains:
+
 - Full JSON object with:
   - `id`: Chat ID (e.g., "chatcmpl-abc123")
   - `object`: Always "chat.completion.chunk"
@@ -65,44 +71,49 @@ Contains:
           - `arguments`: Partial/complete arguments JSON string
 
 ### 4. Stream Finished
+
 Indicates end of streaming response:
 
     [2024-01-15 10:30:04][INFO] Finished streaming response
 
 Contains:
+
 - No additional payload
 - Used to determine stream end time
 
 ## JSON Format Details
 
 ### Chat ID
+
 Found in `packet.id` field (e.g., "chatcmpl-abc123")
 Used to correlate packets belonging to the same session
 
 ### Usage Data
+
 Found in final packet's `choices[].delta` object:
 {
-  "usage": {
-    "prompt_tokens": 25,
-    "completion_tokens": 20,
-    "total_tokens": 45
-  }
+"usage": {
+"prompt_tokens": 25,
+"completion_tokens": 20,
+"total_tokens": 45
+}
 }
 
 ### Tool Call Structure
+
 Tool calls appear in `choices[].delta.tool_calls[]`:
 
 {
-  "tool_calls": [
-    {
-      "id": "call_abc123",
-      "type": "function",
-      "function": {
-        "name": "get_weather",
-        "arguments": "{\"location\":\"NYC\"}"
-      }
-    }
-  ]
+"tool_calls": [
+{
+"id": "call_abc123",
+"type": "function",
+"function": {
+"name": "get_weather",
+"arguments": "{\"location\":\"NYC\"}"
+}
+}
+]
 }
 
 **Important**: Arguments may be split across multiple deltas.
@@ -120,6 +131,7 @@ Some lines contain JSON that spans multiple lines. Example:
     }
 
 Parser must:
+
 1. Detect opening `{` in message
 2. Accumulate subsequent lines until brace balance reaches zero
 3. Handle strings containing braces (escape awareness)
