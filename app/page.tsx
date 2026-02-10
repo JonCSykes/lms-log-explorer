@@ -1,7 +1,7 @@
 'use client'
 
 import { RefreshCw } from 'lucide-react'
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 
 import MetricsPanel from '@/components/session/MetricsPanel'
 import TimelinePanel from '@/components/session/TimelinePanel'
@@ -20,21 +20,45 @@ import { useSessionDetails } from '@/lib/hooks/useSessionDetails'
 import { useSessions } from '@/lib/hooks/useSessions'
 
 export default function Home() {
-  const { sessions, loading: sessionsLoading } = useSessions()
+  const {
+    sessions,
+    loading: sessionsLoading,
+    refresh,
+    indexStatus,
+    indexingProgress,
+  } = useSessions()
+
   const [selectedSession, setSelectedSession] = useState<string | undefined>(
-    sessions[0]?.chatId
+    sessions[0]?.sessionId
   )
+
+  useEffect(() => {
+    if (!selectedSession && sessions.length > 0) {
+      const firstSession = sessions[0]
+      if (firstSession?.sessionId) {
+        setSelectedSession(firstSession.sessionId)
+      }
+    }
+  }, [selectedSession, sessions])
 
   const { data: sessionData, loading: detailsLoading } = useSessionDetails(
     selectedSession || ''
   )
 
   const activeSession = useMemo(
-    () => sessions.find((session) => session.chatId === selectedSession),
+    () => sessions.find((session) => session.sessionId === selectedSession),
     [selectedSession, sessions]
   )
 
   const isLoading = sessionsLoading || (selectedSession && detailsLoading)
+  const isIndexing = indexStatus?.state === 'indexing'
+  const indexingDetails = indexStatus || {
+    processedFiles: 0,
+    totalFiles: 0,
+    currentFile: undefined,
+  }
+  const processedFilesLabel = Math.floor(indexingDetails.processedFiles)
+  const totalFilesLabel = Math.max(0, Math.floor(indexingDetails.totalFiles))
 
   if (!activeSession) {
     return (
@@ -42,8 +66,9 @@ export default function Home() {
         <div className="flex min-h-screen w-full">
           <SessionsSidebar
             sessions={sessions}
-            selectedChatId={selectedSession}
+            selectedSessionId={selectedSession}
             onSelectSession={setSelectedSession}
+            onRefresh={refresh}
           />
           <SidebarInset className="bg-background">
             <header className="flex h-16 items-center gap-3 border-b border-border px-4">
@@ -56,7 +81,12 @@ export default function Home() {
                   </h1>
                 </div>
                 <div className="flex items-center gap-2">
-                  <Button variant="outline" size="sm" className="gap-2">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="gap-2"
+                    onClick={() => void refresh()}
+                  >
                     {sessionsLoading ? (
                       'Loading...'
                     ) : (
@@ -75,6 +105,32 @@ export default function Home() {
             </main>
           </SidebarInset>
         </div>
+        {isIndexing ? (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 px-4">
+            <div className="w-full max-w-lg rounded-lg border border-border bg-background p-6 shadow-lg">
+              <h2 className="text-lg font-semibold">Indexing Log Files</h2>
+              <p className="mt-2 text-sm text-muted-foreground">
+                Parsing LM Studio logs. Sessions will appear as indexing
+                progresses.
+              </p>
+              <div className="mt-4 h-3 w-full overflow-hidden rounded-full bg-muted">
+                <div
+                  className="h-full bg-primary transition-all"
+                  style={{ width: `${indexingProgress}%` }}
+                />
+              </div>
+              <div className="mt-2 text-xs text-muted-foreground">
+                {indexingProgress}% complete ({processedFilesLabel}/
+                {totalFilesLabel} files)
+              </div>
+              {indexingDetails.currentFile ? (
+                <div className="mt-2 truncate text-xs text-muted-foreground">
+                  {indexingDetails.currentFile}
+                </div>
+              ) : null}
+            </div>
+          </div>
+        ) : null}
       </SidebarProvider>
     )
   }
@@ -84,8 +140,9 @@ export default function Home() {
       <div className="flex min-h-screen w-full">
         <SessionsSidebar
           sessions={sessions}
-          selectedChatId={selectedSession}
+          selectedSessionId={selectedSession}
           onSelectSession={setSelectedSession}
+          onRefresh={refresh}
         />
 
         <SidebarInset className="bg-background">
@@ -99,7 +156,12 @@ export default function Home() {
                 </h1>
               </div>
               <div className="flex items-center gap-2">
-                <Button variant="outline" size="sm" className="gap-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="gap-2"
+                  onClick={() => void refresh()}
+                >
                   {isLoading ? 'Loading...' : <RefreshCw className="size-4" />}
                   Refresh
                 </Button>
@@ -139,7 +201,10 @@ export default function Home() {
                 </div>
 
                 <TabsContent value="timeline" className="space-y-4">
-                  <TimelinePanel events={sessionData.events} />
+                  <TimelinePanel
+                    events={sessionData.events}
+                    request={sessionData.request}
+                  />
                 </TabsContent>
                 <TabsContent value="tool-calls" className="space-y-4">
                   <ToolCallsPanel toolCalls={sessionData.toolCalls} />
@@ -152,6 +217,32 @@ export default function Home() {
           </main>
         </SidebarInset>
       </div>
+      {isIndexing ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 px-4">
+          <div className="w-full max-w-lg rounded-lg border border-border bg-background p-6 shadow-lg">
+            <h2 className="text-lg font-semibold">Indexing Log Files</h2>
+            <p className="mt-2 text-sm text-muted-foreground">
+              Parsing LM Studio logs. Existing sessions stay available while new
+              files are indexed.
+            </p>
+            <div className="mt-4 h-3 w-full overflow-hidden rounded-full bg-muted">
+              <div
+                className="h-full bg-primary transition-all"
+                style={{ width: `${indexingProgress}%` }}
+              />
+            </div>
+            <div className="mt-2 text-xs text-muted-foreground">
+              {indexingProgress}% complete ({processedFilesLabel}/
+              {totalFilesLabel} files)
+            </div>
+            {indexingDetails.currentFile ? (
+              <div className="mt-2 truncate text-xs text-muted-foreground">
+                {indexingDetails.currentFile}
+              </div>
+            ) : null}
+          </div>
+        </div>
+      ) : null}
     </SidebarProvider>
   )
 }

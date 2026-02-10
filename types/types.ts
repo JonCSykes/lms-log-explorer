@@ -14,9 +14,15 @@ export type Timestamp = string
  */
 export interface Session {
   /**
-   * Unique identifier (e.g., "chatcmpl-abc123")
+   * Sequential session identifier (e.g., "session-001")
    */
-  chatId: string
+  sessionId: string
+
+  /**
+   * First chatId observed in this session (from first packet)
+   * Used for tool call correlation and backward compatibility
+   */
+  chatId?: string
 
   /**
    * Timestamp of first event in session
@@ -89,7 +95,7 @@ export interface SessionMetrics {
  */
 export type TimelineEventType =
   | 'request'
-  | 'prompt_progress'
+  | 'prompt_processing'
   | 'stream_chunk'
   | 'tool_call'
   | 'usage'
@@ -146,21 +152,27 @@ export interface ToolDefinition {
 }
 
 /**
- * Prompt progress event
+ * Prompt processing aggregate event
  */
-export interface PromptProgressEvent extends TimelineEvent {
-  type: 'prompt_progress'
-  percent: number
+export interface PromptProcessingEvent extends TimelineEvent {
+  type: 'prompt_processing'
+  eventCount: number
+  elapsedMs: number
+  firstPromptTs: Timestamp
+  lastPromptTs: Timestamp
+  lastPercent?: number
 }
 
 /**
- * Stream chunk event
+ * Stream response aggregate event
  */
 export interface StreamChunkEvent extends TimelineEvent {
   type: 'stream_chunk'
-  packetId: string
-  content?: string
-  toolCalls?: ToolCallDelta[]
+  chunkCount: number
+  elapsedMs: number
+  firstChunkTs: Timestamp
+  lastChunkTs: Timestamp
+  responseText: string
 }
 
 /**
@@ -208,6 +220,7 @@ export interface StreamFinishedEvent extends TimelineEvent {
  */
 export interface SessionsListItem {
   chatId: string
+  sessionId: string
   firstSeenAt: Timestamp
   model?: string
   promptTokens?: number

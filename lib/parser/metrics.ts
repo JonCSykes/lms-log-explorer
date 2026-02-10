@@ -42,6 +42,7 @@ export class UsageTracker {
   private promptTokens?: number
   private completionTokens?: number
   private totalTokens?: number
+  private updated = false
 
   /**
    * Update usage from packet
@@ -51,6 +52,7 @@ export class UsageTracker {
     completion_tokens?: number
     total_tokens?: number
   }): void {
+    this.updated = true
     if (usage.prompt_tokens !== undefined) {
       this.promptTokens = usage.prompt_tokens
     }
@@ -60,6 +62,20 @@ export class UsageTracker {
     if (usage.total_tokens !== undefined) {
       this.totalTokens = usage.total_tokens
     }
+  }
+
+  /**
+   * Check if usage was updated in last call
+   */
+  isUpdated(): boolean {
+    return this.updated
+  }
+
+  /**
+   * Reset updated flag (call after checking)
+   */
+  resetUpdated(): void {
+    this.updated = false
   }
 
   /**
@@ -78,16 +94,22 @@ export class UsageTracker {
  * Track timing information for stages
  */
 export class TimingTracker {
-  private promptProgressTs?: string
+  private firstPromptProgressTs?: string
+  private lastPromptProgressTs?: string
   private firstPacketTs?: string
   private lastPacketTs?: string
+  private streamFinishedTs?: string
 
   /**
    * Record prompt progress timestamp
    */
   recordPromptProgress(ts: Timestamp): void {
-    if (!this.promptProgressTs || ts < this.promptProgressTs) {
-      this.promptProgressTs = ts
+    if (!this.firstPromptProgressTs || ts < this.firstPromptProgressTs) {
+      this.firstPromptProgressTs = ts
+    }
+
+    if (!this.lastPromptProgressTs || ts > this.lastPromptProgressTs) {
+      this.lastPromptProgressTs = ts
     }
   }
 
@@ -110,31 +132,35 @@ export class TimingTracker {
   }
 
   /**
+   * Record stream finished timestamp
+   */
+  recordStreamFinished(ts: Timestamp): void {
+    if (!this.streamFinishedTs || ts > this.streamFinishedTs) {
+      this.streamFinishedTs = ts
+    }
+  }
+
+  /**
    * Compute prompt processing time
    */
   computePromptProcessingMs(): number | undefined {
-    if (!this.promptProgressTs || !this.firstPacketTs) {
+    if (!this.firstPromptProgressTs || !this.lastPromptProgressTs) {
       return undefined
     }
 
-    const startTime = parseTimestampMs(this.promptProgressTs)
-    const endTime = parseTimestampMs(this.firstPacketTs)
-
-    return endTime - startTime
+    return computeDurationMs(this.firstPromptProgressTs, this.lastPromptProgressTs)
   }
 
   /**
    * Compute stream latency
    */
   computeStreamLatencyMs(): number | undefined {
-    if (!this.firstPacketTs || !this.lastPacketTs) {
+    const streamEndTs = this.streamFinishedTs || this.lastPacketTs
+    if (!this.firstPacketTs || !streamEndTs) {
       return undefined
     }
 
-    const startTime = parseTimestampMs(this.firstPacketTs)
-    const endTime = parseTimestampMs(this.lastPacketTs)
-
-    return endTime - startTime
+    return computeDurationMs(this.firstPacketTs, streamEndTs)
   }
 
   /**
@@ -156,31 +182,48 @@ export class TimingTracker {
  * Parse timestamp to milliseconds since epoch
  */
 export function parseTimestampMs(ts: string): number {
-  // LM Studio format: YYYY-MM-DD HH:MM:SS
-  const [date, time] = ts.split(' ')
-  if (!date || !time) {
+  // LM Studio formats:
+  //   YYYY-MM-DD HH:MM:SS
+  //   YYYY-MM-DD HH:MM:SS,mmm
+  //   YYYY-MM-DD HH:MM:SS.mmm
+  const match =
+    /^(\d{4})-(\d{2})-(\d{2}) (\d{2}):(\d{2}):(\d{2})(?:[,.](\d{1,3}))?$/.exec(
+      ts
+    )
+  if (!match) {
     return Date.now()
   }
 
-  const dateParts = date.split('-').map(Number)
-  const timeParts = time.split(':').map(Number)
-  const year = dateParts[0]
-  const month = dateParts[1]
-  const day = dateParts[2]
-  const hour = timeParts[0]
-  const minute = timeParts[1]
-  const second = timeParts[2]
-
+  const [, yearRaw, monthRaw, dayRaw, hourRaw, minuteRaw, secondRaw, msRaw] =
+    match
   if (
-    year === undefined ||
-    month === undefined ||
-    day === undefined ||
-    hour === undefined ||
-    minute === undefined ||
-    second === undefined
+    !yearRaw ||
+    !monthRaw ||
+    !dayRaw ||
+    !hourRaw ||
+    !minuteRaw ||
+    !secondRaw
   ) {
     return Date.now()
   }
 
-  return Date.UTC(year, month - 1, day, hour, minute, second)
+  const year = Number.parseInt(yearRaw, 10)
+  const month = Number.parseInt(monthRaw, 10)
+  const day = Number.parseInt(dayRaw, 10)
+  const hour = Number.parseInt(hourRaw, 10)
+  const minute = Number.parseInt(minuteRaw, 10)
+  const second = Number.parseInt(secondRaw, 10)
+  const millisecond = msRaw ? Number.parseInt(msRaw.padEnd(3, '0'), 10) : 0
+
+  return Date.UTC(year, month - 1, day, hour, minute, second, millisecond)
+}
+
+function computeDurationMs(startTs: string, endTs: string): number | undefined {
+  const startTime = parseTimestampMs(startTs)
+  const endTime = parseTimestampMs(endTs)
+  if (!Number.isFinite(startTime) || !Number.isFinite(endTime)) {
+    return undefined
+  }
+
+  return endTime - startTime
 }

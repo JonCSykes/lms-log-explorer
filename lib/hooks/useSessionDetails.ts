@@ -3,11 +3,13 @@
 import { useEffect, useState } from 'react'
 
 interface SessionResponse {
-  session: SessionData
+  session: SessionData | null
+  message?: string
 }
 
 interface SessionData {
-  chatId: string
+  sessionId: string
+  chatId?: string
   firstSeenAt: string
   model?: string
   request?: RequestData
@@ -17,6 +19,9 @@ interface SessionData {
 }
 
 interface RequestData {
+  id?: string
+  type?: 'request'
+  ts?: string
   endpoint: string
   method: string
   body: Record<string, unknown>
@@ -26,13 +31,44 @@ interface TimelineEvent {
   id: string
   type:
     | 'request'
-    | 'prompt_progress'
+    | 'prompt_processing'
     | 'stream_chunk'
     | 'tool_call'
     | 'usage'
     | 'stream_finished'
   ts: string
   data?: unknown
+}
+
+function ensureRequestEvent(
+  events: TimelineEvent[],
+  request: RequestData | undefined
+): TimelineEvent[] {
+  if (!request) {
+    return events
+  }
+
+  const hasRequestEvent = events.some((event) => event.type === 'request')
+  if (hasRequestEvent) {
+    return events
+  }
+
+  const requestTs = request.ts || events[0]?.ts || new Date().toISOString()
+  const requestId = request.id || `request-${requestTs}`
+
+  return [
+    {
+      id: requestId,
+      type: 'request',
+      ts: requestTs,
+      data: {
+        method: request.method,
+        endpoint: request.endpoint,
+        body: request.body,
+      },
+    },
+    ...events,
+  ]
 }
 
 interface ToolCallItem {
@@ -51,19 +87,19 @@ interface SessionMetrics {
   tokensPerSecond?: number
 }
 
-export function useSessionDetails(chatId: string) {
+export function useSessionDetails(sessionId: string) {
   const [data, setData] = useState<SessionData | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
-    if (!chatId) return
+    if (!sessionId) return
 
     async function fetchSession() {
       try {
         setLoading(true)
         const response = await fetch(
-          `/api/sessions/chatId?chatId=${encodeURIComponent(chatId)}`
+          `/api/sessions/chatId?sessionId=${encodeURIComponent(sessionId)}`
         )
 
         if (!response.ok) {
@@ -71,7 +107,16 @@ export function useSessionDetails(chatId: string) {
         }
 
         const result: SessionResponse = await response.json()
-        setData(result.session)
+        const session = result.session
+        if (!session) {
+          setData(null)
+          return
+        }
+
+        setData({
+          ...session,
+          events: ensureRequestEvent(session.events, session.request),
+        })
       } catch (err) {
         setError(err instanceof Error ? err.message : 'Unknown error')
       } finally {
@@ -80,7 +125,7 @@ export function useSessionDetails(chatId: string) {
     }
 
     void fetchSession()
-  }, [chatId])
+  }, [sessionId])
 
   return { data, loading, error }
 }

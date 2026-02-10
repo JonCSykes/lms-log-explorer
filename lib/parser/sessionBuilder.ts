@@ -1,19 +1,17 @@
 import {
   type ParserEvent,
+  type PromptProcessingEvent,
   type RequestReceivedEvent,
   type StreamPacketEvent,
   classifyLogLine,
+  extractToolCalls,
 } from './events'
 import { type LogLine } from './lineReader'
-import { TimingTracker, UsageTracker } from './metrics'
-import { SessionLinker } from './sessionLinker'
-import { ToolCallMerger } from './toolCalls'
+import { TimingTracker, parseTimestampMs } from './metrics'
+import { ToolCallMerger, parseToolCallArguments } from './toolCalls'
 
-/**
- * Aggregated session data
- */
 export interface SessionData {
-  chatId: string
+  chatId?: string
   model?: string
   firstSeenAt: string
   request?: RequestReceivedEvent
@@ -22,36 +20,6 @@ export interface SessionData {
   metrics: SessionMetrics
 }
 
-/**
- * Normalized timeline event (aggregated from parser events)
- */
-export interface TimelineEvent {
-  id: string
-  type:
-    | 'request'
-    | 'prompt_progress'
-    | 'stream_chunk'
-    | 'tool_call'
-    | 'usage'
-    | 'stream_finished'
-  ts: string
-  data?: unknown
-}
-
-/**
- * Tool call data with aggregated arguments
- */
-export interface ToolCallData {
-  id: string
-  name: string
-  argumentsText: string
-  argumentsJson?: Record<string, unknown>
-  requestedAt?: string
-}
-
-/**
- * Session metrics with computed values
- */
 export interface SessionMetrics {
   promptTokens?: number
   completionTokens?: number
@@ -61,203 +29,657 @@ export interface SessionMetrics {
   tokensPerSecond?: number
 }
 
-/**
- * Build a session from parsed parser events
- */
-export class SessionBuilder {
-  private chatId?: string
-  private model?: string
-  private firstSeenAt = ''
-  private requestEvent?: RequestReceivedEvent
-  private timelineEvents: TimelineEvent[] = []
-  private toolCallMerger = new ToolCallMerger()
-  private usageTracker = new UsageTracker()
-  private timingTracker = new TimingTracker()
-  private sessionLinker = new SessionLinker()
+export interface TimelineEvent {
+  id: string
+  type:
+    | 'request'
+    | 'prompt_processing'
+    | 'stream_chunk'
+    | 'tool_call'
+    | 'usage'
+    | 'stream_finished'
+  ts: string
+  data?: unknown
+}
 
-  addLine(line: LogLine): void {
-    const event = classifyLogLine(line)
-    if (!event) return
+export interface ToolCallData {
+  id: string
+  name: string
+  argumentsText: string
+  argumentsJson?: Record<string, unknown>
+  requestedAt?: string
+}
 
-    switch (event.type) {
-      case 'request_received':
-        this.handleRequestReceived(event as RequestReceivedEvent)
-        break
-      case 'prompt_progress':
-        this.handlePromptProgress(event, line.ts)
-        break
-      case 'stream_packet':
-        this.handleStreamPacket(event as StreamPacketEvent, line.ts)
-        break
-      case 'stream_finished':
-        this.handleStreamFinished(line.ts)
-        break
-      case 'parser_error':
-        // Skip malformed lines and continue building session data.
-        break
-    }
-  }
+interface BuildAsyncOptions {
+  onProgress?: (fractionComplete: number) => void
+}
 
-  private handleRequestReceived(event: RequestReceivedEvent): void {
-    this.requestEvent = event
+interface SessionState {
+  chatId?: string
+  model?: string
+  firstSeenAt: string
+  request?: RequestReceivedEvent
+  events: TimelineEvent[]
+  promptAccumulator: PromptAccumulator
+  streamAccumulator: StreamAccumulator
+  toolCallMerger: ToolCallMerger
+  timingTracker: TimingTracker
+}
 
-    const body = event.data.body as { model?: string }
-    if (body.model) {
-      this.model = body.model
-    }
+interface PromptAccumulator {
+  eventCount: number
+  firstPromptTs?: string
+  lastPromptTs?: string
+  lastPercent?: number
+  flushed: boolean
+}
 
-    this.sessionLinker.addRequest(event)
-  }
+interface StreamAccumulator {
+  chunkCount: number
+  firstChunkTs?: string
+  lastChunkTs?: string
+  responseParts: string[]
+  flushed: boolean
+}
 
-  private handlePromptProgress(event: ParserEvent, ts: string): void {
-    const percent = (event.data as { percent: number }).percent
-    this.timelineEvents.push({
-      id: `prompt-${ts}`,
-      type: 'prompt_progress',
-      ts,
-      data: { percent },
-    })
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null
+}
 
-    this.timingTracker.recordPromptProgress(ts)
-  }
+function isJsonEventStart(message: string): boolean {
+  return (
+    message.includes(
+      'Received request: POST to /v1/chat/completions with body'
+    ) || message.includes('Generated packet:')
+  )
+}
 
-  private handleStreamPacket(event: StreamPacketEvent, ts: string): void {
-    const packetData = event.data
-    const packetId = packetData.packetId
+interface JsonBalanceState {
+  braceCount: number
+  inString: boolean
+  escapeNext: boolean
+}
 
-    if (!this.firstSeenAt) {
-      this.firstSeenAt = ts
-    }
+const YIELD_EVERY_LINES = 250
 
-    const packetEvent: StreamPacketEvent = {
-      type: 'stream_packet',
-      ts,
-      data: { packetId, rawJson: packetData.rawJson },
-    }
-
-    const correlation = this.sessionLinker.linkPacket(packetEvent)
-
-    if (!this.chatId) {
-      this.chatId = correlation.sessionchatId
-      if (correlation.requestEvent) {
-        this.requestEvent = correlation.requestEvent
-      }
-    }
-
-    if (packetData.rawJson) {
-      try {
-        const rawPacket = JSON.parse(packetData.rawJson)
-
-        if (this.model === undefined && rawPacket.model) {
-          this.model = rawPacket.model
-        }
-
-        this.usageTracker.update(rawPacket.usage || {})
-        this.timingTracker.recordFirstPacket(ts)
-        this.timingTracker.recordLastPacket(ts)
-
-        const choice = rawPacket.choices?.[0]
-
-        if (choice?.delta?.content) {
-          this.timelineEvents.push({
-            id: `chunk-${packetId}-${ts}`,
-            type: 'stream_chunk',
-            ts,
-            data: { content: choice.delta.content },
-          })
-        }
-
-        if (choice?.delta?.tool_calls) {
-          for (const delta of choice.delta.tool_calls) {
-            this.toolCallMerger.addDelta(delta, ts)
-            const deltaId = String(
-              typeof delta.id === 'string' ? delta.id : `${packetId}-${ts}`
-            )
-
-            this.timelineEvents.push({
-              id: `tool-${deltaId}`,
-              type: 'tool_call',
-              ts,
-              data: delta,
-            })
-          }
-        }
-
-        if (rawPacket.usage) {
-          this.timelineEvents.push({
-            id: `usage-${ts}`,
-            type: 'usage',
-            ts,
-            data: rawPacket.usage,
-          })
-        }
-
-        if (choice?.finish_reason === 'stop') {
-          this.timelineEvents.push({
-            id: 'stream-finished',
-            type: 'stream_finished',
-            ts,
-          })
-        }
-      } catch (e) {
-        // Skip malformed JSON in packet
-      }
-    }
-  }
-
-  private handleStreamFinished(ts: string): void {
-    this.timelineEvents.push({
-      id: 'stream-finished',
-      type: 'stream_finished',
-      ts,
-    })
-  }
-
-  build(): SessionData | null {
-    if (!this.chatId) return null
-
-    const toolCalls = this.toolCallMerger.getToolCalls().map((tc) => {
-      const argumentsJson = parseToolCallArguments(tc.argumentsText)
-      return {
-        id: tc.id,
-        name: tc.name || 'unknown',
-        argumentsText: tc.argumentsText,
-        argumentsJson: argumentsJson ?? undefined,
-        requestedAt: tc.firstSeenAt,
-      }
-    })
-
-    const metrics = {
-      promptTokens: this.usageTracker.getMetrics().promptTokens,
-      completionTokens: this.usageTracker.getMetrics().completionTokens,
-      totalTokens: this.usageTracker.getMetrics().totalTokens,
-      promptProcessingMs: this.timingTracker.computePromptProcessingMs(),
-      streamLatencyMs: this.timingTracker.computeStreamLatencyMs(),
-      tokensPerSecond: this.timingTracker.computeTokensPerSecond(
-        this.usageTracker.getMetrics().completionTokens
-      ),
+function updateJsonBalance(
+  text: string,
+  state: JsonBalanceState,
+  startIndex: number = 0
+): void {
+  for (let i = startIndex; i < text.length; i++) {
+    const char = text[i]
+    if (!char) {
+      continue
     }
 
-    return {
-      chatId: this.chatId,
-      model: this.model,
-      firstSeenAt: this.firstSeenAt || new Date().toISOString(),
-      request: this.requestEvent,
-      events: this.timelineEvents,
-      toolCalls,
-      metrics,
+    if (state.escapeNext) {
+      state.escapeNext = false
+      continue
+    }
+
+    if (char === '\\') {
+      state.escapeNext = true
+      continue
+    }
+
+    if (char === '"') {
+      state.inString = !state.inString
+      continue
+    }
+
+    if (state.inString) {
+      continue
+    }
+
+    if (char === '{') {
+      state.braceCount++
+    } else if (char === '}') {
+      state.braceCount--
     }
   }
 }
 
-function parseToolCallArguments(
-  text: string
-): Record<string, unknown> | undefined {
-  if (!text.trim()) return undefined
+function createJsonBalanceState(message: string): JsonBalanceState | null {
+  const startIndex = message.indexOf('{')
+  if (startIndex === -1) {
+    return null
+  }
 
+  const state: JsonBalanceState = {
+    braceCount: 0,
+    inString: false,
+    escapeNext: false,
+  }
+
+  updateJsonBalance(message, state, startIndex)
+  return state
+}
+
+function combineMultilineJsonLines(lines: LogLine[]): LogLine[] {
+  const combined: LogLine[] = []
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i]
+    if (!line) {
+      continue
+    }
+
+    if (line.isContinuation) {
+      // Continuation lines are consumed by the previous JSON start line.
+      continue
+    }
+
+    if (!isJsonEventStart(line.message)) {
+      combined.push(line)
+      continue
+    }
+
+    let mergedMessage = line.message
+    let lastIndex = i
+
+    const state = createJsonBalanceState(mergedMessage)
+    if (state && state.braceCount > 0) {
+      for (let j = i + 1; j < lines.length; j++) {
+        const nextLine = lines[j]
+        if (!nextLine?.isContinuation) {
+          break
+        }
+
+        mergedMessage += `\n${nextLine.rawLine}`
+        lastIndex = j
+
+        updateJsonBalance(nextLine.rawLine, state)
+        if (state.braceCount <= 0) {
+          break
+        }
+      }
+    }
+
+    combined.push({
+      ...line,
+      message: mergedMessage,
+      rawLine: line.rawLine,
+    })
+
+    i = lastIndex
+  }
+
+  return combined
+}
+
+async function combineMultilineJsonLinesAsync(
+  lines: LogLine[],
+  options?: BuildAsyncOptions
+): Promise<LogLine[]> {
+  const combined: LogLine[] = []
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i]
+    if (!line) {
+      if (i > 0 && i % YIELD_EVERY_LINES === 0) {
+        options?.onProgress?.(Math.min(0.5, i / (lines.length * 2)))
+        await yieldToEventLoop()
+      }
+      continue
+    }
+
+    if (line.isContinuation) {
+      if (i > 0 && i % YIELD_EVERY_LINES === 0) {
+        options?.onProgress?.(Math.min(0.5, i / (lines.length * 2)))
+        await yieldToEventLoop()
+      }
+      continue
+    }
+
+    if (!isJsonEventStart(line.message)) {
+      combined.push(line)
+      if (i > 0 && i % YIELD_EVERY_LINES === 0) {
+        options?.onProgress?.(Math.min(0.5, i / (lines.length * 2)))
+        await yieldToEventLoop()
+      }
+      continue
+    }
+
+    let mergedMessage = line.message
+    let lastIndex = i
+
+    const state = createJsonBalanceState(mergedMessage)
+    if (state && state.braceCount > 0) {
+      for (let j = i + 1; j < lines.length; j++) {
+        const nextLine = lines[j]
+        if (!nextLine?.isContinuation) {
+          break
+        }
+
+        mergedMessage += `\n${nextLine.rawLine}`
+        lastIndex = j
+
+        updateJsonBalance(nextLine.rawLine, state)
+        if (state.braceCount <= 0) {
+          break
+        }
+
+        if (j > 0 && j % YIELD_EVERY_LINES === 0) {
+          options?.onProgress?.(Math.min(0.5, j / (lines.length * 2)))
+          await yieldToEventLoop()
+        }
+      }
+    }
+
+    combined.push({
+      ...line,
+      message: mergedMessage,
+      rawLine: line.rawLine,
+    })
+
+    i = lastIndex
+    if (i > 0 && i % YIELD_EVERY_LINES === 0) {
+      options?.onProgress?.(Math.min(0.5, i / (lines.length * 2)))
+      await yieldToEventLoop()
+    }
+  }
+
+  options?.onProgress?.(0.5)
+  return combined
+}
+
+export function build(lines: LogLine[]): SessionData[] {
+  const sessions: SessionData[] = []
+  const logicalLines = combineMultilineJsonLines(lines)
+  let currentSession: SessionState | null = null
+
+  for (const line of logicalLines) {
+    const event = classifyLogLine(line)
+    if (!event) {
+      continue
+    }
+
+    currentSession = processEvent(event, sessions, currentSession)
+  }
+
+  if (currentSession) {
+    finalizeSession(sessions, currentSession)
+  }
+
+  return sessions
+}
+
+export async function buildAsync(
+  lines: LogLine[],
+  options?: BuildAsyncOptions
+): Promise<SessionData[]> {
+  const sessions: SessionData[] = []
+  const logicalLines = await combineMultilineJsonLinesAsync(lines, options)
+  let currentSession: SessionState | null = null
+
+  for (let i = 0; i < logicalLines.length; i++) {
+    const line = logicalLines[i]
+    if (!line) {
+      // no-op
+    } else {
+      const event = classifyLogLine(line)
+      if (event) {
+        currentSession = processEvent(event, sessions, currentSession)
+      }
+    }
+
+    if (i > 0 && i % YIELD_EVERY_LINES === 0) {
+      const parseFraction =
+        logicalLines.length > 0
+          ? 0.5 + Math.min(0.5, i / (logicalLines.length * 2))
+          : 1
+      options?.onProgress?.(parseFraction)
+      await yieldToEventLoop()
+    }
+  }
+
+  if (currentSession) {
+    finalizeSession(sessions, currentSession)
+  }
+
+  options?.onProgress?.(1)
+  return sessions
+}
+
+function processEvent(
+  event: ParserEvent,
+  sessions: SessionData[],
+  currentSession: SessionState | null
+): SessionState | null {
+  if (event.type === 'request_received') {
+    if (currentSession) {
+      finalizeSession(sessions, currentSession)
+    }
+
+    const requestEvent = event as RequestReceivedEvent
+    const nextSession = createSession(requestEvent.ts, requestEvent)
+    nextSession.events.push({
+      id: `request-${requestEvent.ts}`,
+      type: 'request',
+      ts: requestEvent.ts,
+      data: requestEvent.data,
+    })
+    return nextSession
+  }
+
+  if (event.type === 'stream_packet') {
+    const nextSession =
+      currentSession ?? createSession((event as StreamPacketEvent).ts)
+    processStreamPacket(nextSession, event as StreamPacketEvent)
+    return nextSession
+  }
+
+  if (event.type === 'prompt_processing') {
+    const nextSession = currentSession ?? createSession(event.ts)
+    processPromptProcessing(nextSession, event as PromptProcessingEvent)
+    return nextSession
+  }
+
+  if (event.type === 'stream_finished') {
+    if (!currentSession) {
+      return null
+    }
+
+    flushPromptAccumulator(currentSession)
+    flushStreamAccumulator(currentSession)
+    currentSession.events.push({
+      id: `stream-finished-${event.ts}`,
+      type: 'stream_finished',
+      ts: event.ts,
+    })
+    currentSession.timingTracker.recordStreamFinished(event.ts)
+    finalizeSession(sessions, currentSession)
+    return null
+  }
+
+  return currentSession
+}
+
+function createSession(
+  firstSeenAt: string,
+  request?: RequestReceivedEvent
+): SessionState {
+  return {
+    chatId: undefined,
+    model: undefined,
+    firstSeenAt,
+    request,
+    events: [],
+    promptAccumulator: {
+      eventCount: 0,
+      firstPromptTs: undefined,
+      lastPromptTs: undefined,
+      lastPercent: undefined,
+      flushed: false,
+    },
+    streamAccumulator: {
+      chunkCount: 0,
+      firstChunkTs: undefined,
+      lastChunkTs: undefined,
+      responseParts: [],
+      flushed: false,
+    },
+    toolCallMerger: new ToolCallMerger(),
+    timingTracker: new TimingTracker(),
+  }
+}
+
+function finalizeSession(sessions: SessionData[], state: SessionState): void {
+  flushPromptAccumulator(state)
+  flushStreamAccumulator(state)
+
+  if (!state.request && state.events.length === 0) {
+    return
+  }
+
+  const toolCalls = state.toolCallMerger.getToolCalls().map((toolCall) => ({
+    id: toolCall.id,
+    name: toolCall.name || '',
+    argumentsText: toolCall.argumentsText,
+    argumentsJson: parseToolCallArguments(toolCall.argumentsText) ?? undefined,
+    requestedAt: toolCall.firstSeenAt,
+  }))
+
+  sessions.push({
+    chatId: state.chatId,
+    model: state.model,
+    firstSeenAt: state.firstSeenAt,
+    request: state.request,
+    events: state.events,
+    toolCalls,
+    metrics: computeMetrics(state.timingTracker, state.events),
+  })
+}
+
+function processStreamPacket(
+  state: SessionState,
+  event: StreamPacketEvent
+): void {
+  const packetData = event.data as
+    | { packetId: string; rawJson: string }
+    | undefined
+  if (!packetData) {
+    return
+  }
+
+  const packet = parsePacket(packetData.rawJson)
+  if (!packet) {
+    return
+  }
+
+  if (!state.chatId && typeof packet.id === 'string') {
+    state.chatId = packet.id
+  }
+
+  if (!state.model && typeof packet.model === 'string') {
+    state.model = packet.model
+  }
+
+  flushPromptAccumulator(state)
+
+  state.streamAccumulator.chunkCount += 1
+  state.streamAccumulator.firstChunkTs =
+    state.streamAccumulator.firstChunkTs || event.ts
+  state.streamAccumulator.lastChunkTs = event.ts
+
+  const content = extractStreamContent(packet)
+  if (content.length > 0) {
+    state.streamAccumulator.responseParts.push(content)
+  }
+
+  const toolCallDeltas = extractToolCalls(packet)
+  for (const [index, delta] of toolCallDeltas.entries()) {
+    state.toolCallMerger.addDelta(delta, event.ts)
+    state.events.push({
+      id: `tool-call-${event.ts}-${index + 1}-${state.events.length + 1}`,
+      type: 'tool_call',
+      ts: event.ts,
+      data: delta,
+    })
+  }
+
+  const usage = extractUsageFromPacket(packet)
+  if (usage) {
+    state.events.push({
+      id: `usage-${event.ts}-${state.events.length + 1}`,
+      type: 'usage',
+      ts: event.ts,
+      data: usage,
+    })
+  }
+
+  state.timingTracker.recordFirstPacket(event.ts)
+  state.timingTracker.recordLastPacket(event.ts)
+}
+
+function processPromptProcessing(
+  state: SessionState,
+  event: PromptProcessingEvent
+): void {
+  const progressData = event.data as { percent: number } | undefined
+  if (!progressData) {
+    return
+  }
+
+  state.timingTracker.recordPromptProgress(event.ts)
+  state.promptAccumulator.eventCount += 1
+  state.promptAccumulator.firstPromptTs =
+    state.promptAccumulator.firstPromptTs || event.ts
+  state.promptAccumulator.lastPromptTs = event.ts
+  state.promptAccumulator.lastPercent = progressData.percent
+}
+
+function computeMetrics(
+  timingTracker: TimingTracker,
+  events: TimelineEvent[]
+): SessionMetrics {
+  let promptTokens: number | undefined
+  let completionTokens: number | undefined
+  let totalTokens: number | undefined
+
+  for (const event of events) {
+    if (event.type !== 'usage' || !event.data) {
+      continue
+    }
+
+    const usage = event.data as Record<string, unknown>
+    if (typeof usage.prompt_tokens === 'number') {
+      promptTokens = usage.prompt_tokens
+    }
+    if (typeof usage.completion_tokens === 'number') {
+      completionTokens = usage.completion_tokens
+    }
+    if (typeof usage.total_tokens === 'number') {
+      totalTokens = usage.total_tokens
+    }
+  }
+
+  return {
+    promptTokens,
+    completionTokens,
+    totalTokens,
+    promptProcessingMs: timingTracker.computePromptProcessingMs(),
+    streamLatencyMs: timingTracker.computeStreamLatencyMs(),
+    tokensPerSecond: timingTracker.computeTokensPerSecond(completionTokens),
+  }
+}
+
+function parsePacket(rawJson: string): Record<string, unknown> | undefined {
   try {
-    return JSON.parse(text)
+    const parsed = JSON.parse(rawJson) as unknown
+    return isRecord(parsed) ? parsed : undefined
   } catch {
     return undefined
   }
+}
+
+function extractUsageFromPacket(packet: Record<string, unknown>):
+  | {
+      prompt_tokens?: number
+      completion_tokens?: number
+      total_tokens?: number
+    }
+  | undefined {
+  const usageRaw = packet.usage
+  if (!isRecord(usageRaw)) {
+    return undefined
+  }
+
+  return {
+    prompt_tokens:
+      typeof usageRaw.prompt_tokens === 'number'
+        ? usageRaw.prompt_tokens
+        : undefined,
+    completion_tokens:
+      typeof usageRaw.completion_tokens === 'number'
+        ? usageRaw.completion_tokens
+        : undefined,
+    total_tokens:
+      typeof usageRaw.total_tokens === 'number'
+        ? usageRaw.total_tokens
+        : undefined,
+  }
+}
+
+function extractStreamContent(packet: Record<string, unknown>): string {
+  const choicesRaw = packet.choices
+  if (!Array.isArray(choicesRaw)) {
+    return ''
+  }
+
+  const chunks: string[] = []
+  for (const choiceRaw of choicesRaw) {
+    if (!isRecord(choiceRaw)) {
+      continue
+    }
+
+    const deltaRaw = choiceRaw.delta
+    if (!isRecord(deltaRaw)) {
+      continue
+    }
+
+    const contentRaw = deltaRaw.content
+    if (typeof contentRaw === 'string' && contentRaw.length > 0) {
+      chunks.push(contentRaw)
+    }
+  }
+
+  return chunks.join('')
+}
+
+function flushStreamAccumulator(state: SessionState): void {
+  if (state.streamAccumulator.flushed || state.streamAccumulator.chunkCount === 0) {
+    return
+  }
+
+  const firstChunkTs = state.streamAccumulator.firstChunkTs || state.firstSeenAt
+  const lastChunkTs = state.streamAccumulator.lastChunkTs || firstChunkTs
+  const elapsedMs = Math.max(0, parseTimestampMs(lastChunkTs) - parseTimestampMs(firstChunkTs))
+
+  state.events.push({
+    id: `stream-response-${firstChunkTs}-${state.events.length + 1}`,
+    type: 'stream_chunk',
+    ts: lastChunkTs,
+    data: {
+      chunkCount: state.streamAccumulator.chunkCount,
+      elapsedMs,
+      firstChunkTs,
+      lastChunkTs,
+      responseText: state.streamAccumulator.responseParts.join(''),
+    },
+  })
+
+  state.streamAccumulator.flushed = true
+}
+
+function flushPromptAccumulator(state: SessionState): void {
+  if (state.promptAccumulator.flushed || state.promptAccumulator.eventCount === 0) {
+    return
+  }
+
+  const firstPromptTs = state.promptAccumulator.firstPromptTs || state.firstSeenAt
+  const lastPromptTs = state.promptAccumulator.lastPromptTs || firstPromptTs
+  const elapsedMs = Math.max(0, parseTimestampMs(lastPromptTs) - parseTimestampMs(firstPromptTs))
+
+  state.events.push({
+    id: `prompt-processing-${firstPromptTs}-${state.events.length + 1}`,
+    type: 'prompt_processing',
+    ts: lastPromptTs,
+    data: {
+      eventCount: state.promptAccumulator.eventCount,
+      elapsedMs,
+      firstPromptTs,
+      lastPromptTs,
+      lastPercent: state.promptAccumulator.lastPercent,
+    },
+  })
+
+  state.promptAccumulator.flushed = true
+}
+
+function yieldToEventLoop(): Promise<void> {
+  return new Promise((resolve) => {
+    setImmediate(resolve)
+  })
 }

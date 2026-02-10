@@ -74,14 +74,73 @@ function SidebarProvider({
 
 const SIDEBAR_WIDTH = '16rem'
 const SIDEBAR_WIDTH_ICON = '4rem'
+const SIDEBAR_MIN_WIDTH_PX = 280
+const SIDEBAR_MAX_WIDTH_PX = 640
+
+function parseRemToPx(remValue: string): number {
+  const parsed = Number.parseFloat(remValue)
+  if (!Number.isFinite(parsed)) {
+    return 256
+  }
+
+  return parsed * 16
+}
 
 const Sidebar = React.forwardRef<
   HTMLDivElement,
   React.ComponentPropsWithoutRef<'aside'> & {
     collapsible?: 'icon' | 'none'
+    defaultWidth?: number
   }
->(({ className, collapsible = 'icon', ...props }, ref) => {
-  const { open } = useSidebar()
+>(({ className, collapsible = 'icon', defaultWidth, ...props }, ref) => {
+  const { isMobile, open } = useSidebar()
+  const initialWidth = React.useMemo(() => {
+    if (typeof defaultWidth === 'number' && Number.isFinite(defaultWidth)) {
+      return Math.max(
+        SIDEBAR_MIN_WIDTH_PX,
+        Math.min(SIDEBAR_MAX_WIDTH_PX, defaultWidth)
+      )
+    }
+
+    return parseRemToPx(SIDEBAR_WIDTH)
+  }, [defaultWidth])
+
+  const [sidebarWidthPx, setSidebarWidthPx] = React.useState(initialWidth)
+  const resizingRef = React.useRef(false)
+
+  const startResize = (event: React.MouseEvent<HTMLElement>) => {
+    if (isMobile || !open) {
+      return
+    }
+
+    event.preventDefault()
+    resizingRef.current = true
+    document.body.style.userSelect = 'none'
+    document.body.style.cursor = 'col-resize'
+
+    const onMouseMove = (moveEvent: MouseEvent) => {
+      if (!resizingRef.current) {
+        return
+      }
+
+      const nextWidth = Math.max(
+        SIDEBAR_MIN_WIDTH_PX,
+        Math.min(SIDEBAR_MAX_WIDTH_PX, moveEvent.clientX)
+      )
+      setSidebarWidthPx(nextWidth)
+    }
+
+    const onMouseUp = () => {
+      resizingRef.current = false
+      document.body.style.userSelect = ''
+      document.body.style.cursor = ''
+      window.removeEventListener('mousemove', onMouseMove)
+      window.removeEventListener('mouseup', onMouseUp)
+    }
+
+    window.addEventListener('mousemove', onMouseMove)
+    window.addEventListener('mouseup', onMouseUp)
+  }
 
   return (
     <aside
@@ -94,7 +153,7 @@ const Sidebar = React.forwardRef<
       )}
       style={
         {
-          '--sidebar-width': SIDEBAR_WIDTH,
+          '--sidebar-width': `${sidebarWidthPx}px`,
           '--sidebar-width-icon': SIDEBAR_WIDTH_ICON,
         } as React.CSSProperties
       }
@@ -109,6 +168,15 @@ const Sidebar = React.forwardRef<
       >
         {props.children}
       </div>
+      {!isMobile && open ? (
+        <button
+          type="button"
+          tabIndex={-1}
+          aria-label="Resize sidebar"
+          onMouseDown={startResize}
+          className="absolute right-0 top-0 z-10 h-full w-1 cursor-col-resize bg-transparent hover:bg-sidebar-border"
+        />
+      ) : null}
     </aside>
   )
 })

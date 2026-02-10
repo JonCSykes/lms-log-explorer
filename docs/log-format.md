@@ -119,29 +119,31 @@ Tool calls appear in `choices[].delta.tool_calls[]`:
 **Important**: Arguments may be split across multiple deltas.
 Parser must reassemble by concatenating `arguments` strings in order.
 
-## Multi-Line JSON Handling
+## Session Boundaries
 
-Some lines contain JSON that spans multiple lines. Example:
+In LM Studio server logs, a **session** represents a single request and all subsequent events until the next request:
 
-    [2024-01-15 10:30:00][INFO] Received request: POST to /v1/chat/completions with body {
-      "model": "gpt-4",
-      "messages": [
-        {"role":"user","content":"Hello"}
-      ]
-    }
+```
+[Request 1] → [Packets for Request 1]
+[Request 2] → [Packets for Request 2]  # New session starts here
+```
 
-Parser must:
+### Key Characteristics:
 
-1. Detect opening `{` in message
-2. Accumulate subsequent lines until brace balance reaches zero
-3. Handle strings containing braces (escape awareness)
+- **Session starts**: Every `Received request: POST to /v1/chat/completions` line
+- **Session ends**: Right before the next request (or at end of file)
+- **Chat ID** appears in response packets but is **not** the session identifier
+- Multiple requests may share same chatId if using streaming with continuation
 
-## Session Correlation
+### Session ID Assignment:
 
-- **Request received** lines don't contain chat ID
-- **Generated packet** lines contain `id` field (chat ID)
-- **Correlation heuristic**: Match pending requests to incoming packets by timestamp proximity
-- Window: Typically within 1-5 seconds
+The parser assigns sequential session IDs: `session-001`, `session-002`, etc.
+Chat IDs from packets are stored as session metadata for tool call correlation.
+
+### Tool Call Scope:
+
+Tools are defined in the request body and appear in `tool_calls` deltas.
+Each session includes only the tools from its originating request, not from other requests in the log file.
 
 ## Edge Cases
 

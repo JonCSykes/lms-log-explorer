@@ -1,7 +1,10 @@
+/**
+ * @deprecated Session correlation is now handled by sequential session IDs. This module remains for backward compatibility with legacy code.
+ */
 import { type RequestReceivedEvent, type StreamPacketEvent } from './events'
 
 /**
- * Pending requests waiting for packet correlation
+ * @deprecated Pending requests waiting for packet correlation. Session correlation now uses sequential session IDs.
  */
 export interface PendingRequest {
   ts: string
@@ -9,7 +12,7 @@ export interface PendingRequest {
 }
 
 /**
- * Correlate a packet with its request
+ * @deprecated Correlate a packet with its request. Session correlation now uses sequential session IDs.
  * Uses time-based heuristic since requests don't have chat IDs
  */
 export function correlateRequestToPacket(
@@ -53,7 +56,7 @@ export function correlateRequestToPacket(
 }
 
 /**
- * Parse timestamp to milliseconds since epoch
+ * @deprecated Parse timestamp to milliseconds since epoch. Kept for backward compatibility.
  */
 export function parseTimestampToMs(ts: string): number {
   // LM Studio format: YYYY-MM-DD HH:MM:SS
@@ -86,7 +89,7 @@ export function parseTimestampToMs(ts: string): number {
 }
 
 /**
- * Session correlation result
+ * @deprecated Session correlation result. Session correlation now uses sequential session IDs.
  */
 export interface CorrelationResult {
   sessionchatId: string
@@ -95,13 +98,13 @@ export interface CorrelationResult {
 }
 
 /**
- * Link packets to requests and assign chat IDs
+ * @deprecated Link packets to requests and assign chat IDs. Session correlation now uses sequential session IDs.
  */
 export class SessionLinker {
   private pendingRequests: PendingRequest[] = []
 
   /**
-   * Add a pending request for later correlation
+   * @deprecated Add a pending request for later correlation. Session correlation now uses sequential session IDs.
    */
   addRequest(request: RequestReceivedEvent): void {
     this.pendingRequests.push({
@@ -111,7 +114,7 @@ export class SessionLinker {
   }
 
   /**
-   * Try to correlate a packet with a pending request
+   * @deprecated Try to correlate a packet with a pending request. Session correlation now uses sequential session IDs.
    */
   linkPacket(packet: StreamPacketEvent): CorrelationResult {
     const { requestEvent, matchedIndex } = correlateRequestToPacket(

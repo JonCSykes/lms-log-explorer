@@ -14,6 +14,7 @@ export interface LogFile {
   yearMonth: string // YYYY-MM
   filename: string
   mtime: Date
+  size: number
 }
 
 /**
@@ -81,6 +82,7 @@ export function listLogFiles(monthFolder: string): LogFile[] {
         yearMonth: entry.name.substring(0, 7),
         filename: entry.name,
         mtime: stats.mtime,
+        size: stats.size,
       }
     })
     .sort((a, b) => b.mtime.getTime() - a.mtime.getTime())
@@ -100,7 +102,8 @@ export function getAllLogFiles(logRoot?: string): LogFile[] {
   // Return logs from all months
   const allFiles: LogFile[] = []
   for (const monthFolder of monthFolders) {
-    allFiles.push(...listLogFiles(monthFolder))
+    const fullPath = path.join(root, monthFolder)
+    allFiles.push(...listLogFiles(fullPath))
   }
 
   return allFiles

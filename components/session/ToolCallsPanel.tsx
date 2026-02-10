@@ -18,6 +18,7 @@ import {
   TableHead,
   TableRow,
 } from '@/components/ui/table'
+import { formatDurationMs } from '@/lib/duration'
 
 interface ToolCall {
   id: string
@@ -41,9 +42,7 @@ export default function ToolCallsPanel({ toolCalls }: ToolCallsPanelProps) {
   }
 
   const formatDuration = (value?: number) => {
-    if (value === undefined) return 'Unknown'
-    if (value < 1000) return `${value}ms`
-    return `${(value / 1000).toFixed(2)}s`
+    return formatDurationMs(value)
   }
 
   if (toolCalls.length === 0) {

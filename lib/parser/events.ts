@@ -1,29 +1,20 @@
 import { extractJsonBlock } from './jsonBlock'
 import { type LogLine } from './lineReader'
 
-/**
- * Event types emitted by parser
- */
 export type ParserEventType =
   | 'request_received'
-  | 'prompt_progress'
+  | 'prompt_processing'
   | 'stream_packet'
   | 'stream_finished'
   | 'parser_error'
 
-/**
- * Event emitted during parsing
- */
 export interface ParserEvent {
   type: ParserEventType
-  ts: string // ISO timestamp
+  ts: string
   data?: unknown
   error?: Error
 }
 
-/**
- * Request received event with body
- */
 export interface RequestReceivedEvent extends ParserEvent {
   type: 'request_received'
   data: {
@@ -33,37 +24,26 @@ export interface RequestReceivedEvent extends ParserEvent {
   }
 }
 
-/**
- * Prompt progress event
- */
-export interface PromptProgressEvent extends ParserEvent {
-  type: 'prompt_progress'
+export interface PromptProcessingEvent extends ParserEvent {
+  type: 'prompt_processing'
   data: {
     percent: number
   }
 }
 
-/**
- * Stream packet event with raw JSON
- */
 export interface StreamPacketEvent extends ParserEvent {
   type: 'stream_packet'
   data: {
     packetId: string
     rawJson: string
+    model?: string
   }
 }
 
-/**
- * Stream finished event
- */
 export interface StreamFinishedEvent extends ParserEvent {
   type: 'stream_finished'
 }
 
-/**
- * Parser error event
- */
 export interface ParserErrorEvent extends ParserEvent {
   type: 'parser_error'
   data: {
@@ -72,68 +52,79 @@ export interface ParserErrorEvent extends ParserEvent {
   }
 }
 
-/**
- * Extract tool call deltas from stream packet
- */
-export function extractToolCalls(
-  packet: Record<string, unknown>
-): ToolCallDelta[] {
-  const choices = packet.choices as StreamChoice[] | undefined
-  if (!choices) {
-    return []
-  }
-
-  const deltas = choices.flatMap((choice) => {
-    const delta = choice.delta as DeltaContent | undefined
-    return delta?.tool_calls || []
-  })
-
-  return deltas.map((delta) => ({
-    id: delta.id,
-    type: delta.type as 'function',
-    function: {
-      name: delta.function.name,
-      arguments: delta.function.arguments || '',
-    },
-  }))
-}
-
-/**
- * Metadata about a tool call delta
- */
 export interface ToolCallDelta {
-  id: string
-  type: 'function'
+  id?: string
+  index?: number
+  type?: 'function'
   function: {
     name?: string
     arguments?: string
   }
 }
 
-/**
- * Stream choice from packet
- */
 interface StreamChoice {
-  delta: DeltaContent
-  index: number
+  delta?: {
+    role?: 'assistant'
+    content?: string
+    tool_calls?: Array<Record<string, unknown>>
+  }
+  index?: number
 }
 
-/**
- * Content delta from stream
- */
-interface DeltaContent {
-  role?: 'assistant'
-  content?: string
-  tool_calls?: ToolCallDelta[]
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null
 }
 
-/**
- * Classify a log line and emit appropriate event
- */
+export function extractToolCalls(
+  packet: Record<string, unknown>
+): ToolCallDelta[] {
+  const choicesRaw = packet.choices
+  if (!Array.isArray(choicesRaw)) {
+    return []
+  }
+
+  const deltas: ToolCallDelta[] = []
+
+  for (const choiceRaw of choicesRaw) {
+    const choice = choiceRaw as StreamChoice
+    const toolCalls = choice.delta?.tool_calls
+    if (!Array.isArray(toolCalls)) {
+      continue
+    }
+
+    for (const toolCallRaw of toolCalls) {
+      if (!isRecord(toolCallRaw)) {
+        continue
+      }
+
+      const functionRaw = toolCallRaw.function
+      const functionData = isRecord(functionRaw) ? functionRaw : {}
+
+      deltas.push({
+        id: typeof toolCallRaw.id === 'string' ? toolCallRaw.id : undefined,
+        index:
+          typeof toolCallRaw.index === 'number' ? toolCallRaw.index : undefined,
+        type: toolCallRaw.type === 'function' ? 'function' : undefined,
+        function: {
+          name:
+            typeof functionData.name === 'string'
+              ? functionData.name
+              : undefined,
+          arguments:
+            typeof functionData.arguments === 'string'
+              ? functionData.arguments
+              : undefined,
+        },
+      })
+    }
+  }
+
+  return deltas
+}
+
 export function classifyLogLine(line: LogLine): ParserEvent | null {
   const message = line.message
 
-  // Check for request
   if (
     message.includes('Received request: POST to /v1/chat/completions with body')
   ) {
@@ -151,36 +142,33 @@ export function classifyLogLine(line: LogLine): ParserEvent | null {
     }
   }
 
-  // Check for prompt progress
   if (message.includes('Prompt processing progress:')) {
-    const percentMatch = /progress:\s*(\d+)%/.exec(message)
+    const percentMatch = /progress:\s*(\d+(?:[.,]\d+)?)%/i.exec(message)
     const percentRaw = percentMatch?.[1]
     if (percentRaw) {
       return {
-        type: 'prompt_progress',
+        type: 'prompt_processing',
         ts: line.ts,
-        data: { percent: parseInt(percentRaw, 10) },
+        data: { percent: Number.parseFloat(percentRaw.replace(',', '.')) },
       }
     }
   }
 
-  // Check for generated packet
   if (message.includes('Generated packet:')) {
     const { json, raw } = extractJsonBlock(message)
-    if (json && typeof json === 'object' && 'id' in json) {
+    if (isRecord(json) && typeof json.id === 'string') {
       return {
         type: 'stream_packet',
         ts: line.ts,
         data: {
-          packetId: String((json as { id: unknown }).id),
+          packetId: json.id,
           rawJson: raw,
+          model: typeof json.model === 'string' ? json.model : undefined,
         },
       }
     }
-    // Incomplete JSON - may be valid once more lines arrive
   }
 
-  // Check for stream finished
   if (message.includes('Finished streaming response')) {
     return {
       type: 'stream_finished',
@@ -191,16 +179,14 @@ export function classifyLogLine(line: LogLine): ParserEvent | null {
   return null
 }
 
-/**
- * Extract JSON from request message
- */
 export function extractRequestJson(message: string): {
-  json?: object
+  json?: Record<string, unknown>
   raw: string
 } {
   const { json, raw } = extractJsonBlock(message)
-  if (json && message.includes('with body {')) {
+  if (isRecord(json) && message.includes('with body {')) {
     return { json, raw }
   }
+
   return { raw }
 }

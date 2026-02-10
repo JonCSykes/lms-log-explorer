@@ -1,7 +1,6 @@
 export * from './lineReader'
 export * from './jsonBlock'
 export * from './events'
-export * from './sessionLinker'
 export * from './toolCalls'
 export * from './content'
 export * from './metrics'

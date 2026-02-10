@@ -10,6 +10,7 @@ import {
   CollapsibleContent,
   CollapsibleTrigger,
 } from '@/components/ui/collapsible'
+import JsonViewer from '@/components/ui/json-viewer'
 import { Separator } from '@/components/ui/separator'
 import {
   Table,
@@ -18,12 +19,13 @@ import {
   TableHead,
   TableRow,
 } from '@/components/ui/table'
+import { formatDurationMs } from '@/lib/duration'
 
 interface TimelineEvent {
   id: string
   type:
     | 'request'
-    | 'prompt_progress'
+    | 'prompt_processing'
     | 'stream_chunk'
     | 'tool_call'
     | 'usage'
@@ -32,11 +34,34 @@ interface TimelineEvent {
   data?: unknown
 }
 
-interface TimelinePanelProps {
-  events: TimelineEvent[]
+interface StreamResponseData {
+  chunkCount: number
+  elapsedMs: number
+  firstChunkTs: string
+  lastChunkTs: string
+  responseText: string
 }
 
-export default function TimelinePanel({ events }: TimelinePanelProps) {
+interface PromptProcessingData {
+  eventCount: number
+  elapsedMs: number
+  firstPromptTs: string
+  lastPromptTs: string
+  lastPercent?: number
+}
+
+interface TimelinePanelProps {
+  events: TimelineEvent[]
+  request?: RequestData
+}
+
+interface RequestData {
+  endpoint: string
+  method: string
+  body: Record<string, unknown>
+}
+
+export default function TimelinePanel({ events, request }: TimelinePanelProps) {
   const formatTime = (ts: string) => {
     const date = new Date(ts)
     if (Number.isNaN(date.getTime())) return ts
@@ -45,18 +70,60 @@ export default function TimelinePanel({ events }: TimelinePanelProps) {
 
   const formatDuration = (start: string, end: string) => {
     const diff = new Date(end).getTime() - new Date(start).getTime()
-    if (diff < 1000) return `${diff}ms`
-    return `${(diff / 1000).toFixed(2)}s`
+    if (!Number.isFinite(diff)) {
+      return 'Unknown'
+    }
+    return formatDurationMs(diff)
   }
 
-  const formatJson = (data?: unknown) => {
-    if (data === undefined) return 'No payload available.'
-    if (typeof data === 'string') return data
-    try {
-      return JSON.stringify(data, null, 2)
-    } catch {
-      return String(data)
+  const isStreamResponseData = (data: unknown): data is StreamResponseData => {
+    if (!data || typeof data !== 'object') {
+      return false
     }
+
+    const value = data as Record<string, unknown>
+    return (
+      typeof value.chunkCount === 'number' &&
+      typeof value.elapsedMs === 'number' &&
+      typeof value.firstChunkTs === 'string' &&
+      typeof value.lastChunkTs === 'string' &&
+      typeof value.responseText === 'string'
+    )
+  }
+
+  const isPromptProcessingData = (
+    data: unknown
+  ): data is PromptProcessingData => {
+    if (!data || typeof data !== 'object') {
+      return false
+    }
+
+    const value = data as Record<string, unknown>
+    return (
+      typeof value.eventCount === 'number' &&
+      typeof value.elapsedMs === 'number' &&
+      typeof value.firstPromptTs === 'string' &&
+      typeof value.lastPromptTs === 'string'
+    )
+  }
+
+  const getEventDuration = (event: TimelineEvent, nextEvent?: TimelineEvent) => {
+    if (event.type === 'stream_chunk' && isStreamResponseData(event.data)) {
+      return formatDurationMs(event.data.elapsedMs)
+    }
+
+    if (
+      event.type === 'prompt_processing' &&
+      isPromptProcessingData(event.data)
+    ) {
+      return formatDurationMs(event.data.elapsedMs)
+    }
+
+    if (!nextEvent) {
+      return undefined
+    }
+
+    return formatDuration(event.ts, nextEvent.ts)
   }
 
   const renderDataTable = (data?: unknown) => {
@@ -68,37 +135,13 @@ export default function TimelinePanel({ events }: TimelinePanelProps) {
       )
     }
 
-    const entries = Object.entries(data as Record<string, unknown>)
-    if (entries.length === 0) {
-      return (
-        <p className="text-sm text-muted-foreground">
-          No structured data available.
-        </p>
-      )
-    }
-
-    return (
-      <Table>
-        <TableBody>
-          {entries.map(([key, value]) => (
-            <TableRow key={key}>
-              <TableHead className="w-1/3">{key}</TableHead>
-              <TableCell className="font-mono text-xs">
-                {typeof value === 'object'
-                  ? JSON.stringify(value, null, 2)
-                  : String(value)}
-              </TableCell>
-            </TableRow>
-          ))}
-        </TableBody>
-      </Table>
-    )
+    return <JsonViewer data={data} maxHeightClassName="max-h-[20rem]" />
   }
 
   const eventLabels: Record<TimelineEvent['type'], string> = {
     request: 'Request Received',
-    prompt_progress: 'Prompt Progress',
-    stream_chunk: 'Stream Chunk',
+    prompt_processing: 'Prompt Processing',
+    stream_chunk: 'Stream Response',
     tool_call: 'Tool Call Requested',
     usage: 'Usage Summary',
     stream_finished: 'Stream Finished',
@@ -106,6 +149,55 @@ export default function TimelinePanel({ events }: TimelinePanelProps) {
 
   return (
     <div className="space-y-4">
+      {request ? (
+        <Card>
+          <CardHeader>
+            <CardTitle>Request Data</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            <div className="flex items-center gap-2 text-sm">
+              <Badge variant="outline">{request.method}</Badge>
+              <span className="font-medium">{request.endpoint}</span>
+            </div>
+
+            <Table>
+              <TableBody>
+                <TableRow>
+                  <TableHead className="w-1/3">model</TableHead>
+                  <TableCell className="font-mono text-xs">
+                    {String(request.body.model || 'Unknown')}
+                  </TableCell>
+                </TableRow>
+                <TableRow>
+                  <TableHead className="w-1/3">messages</TableHead>
+                  <TableCell className="font-mono text-xs">
+                    {Array.isArray(request.body.messages)
+                      ? request.body.messages.length
+                      : 0}
+                  </TableCell>
+                </TableRow>
+              </TableBody>
+            </Table>
+
+            <Collapsible className="rounded-md border border-border bg-muted">
+              <CollapsibleTrigger asChild>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="group w-full justify-between"
+                >
+                  Raw request payload
+                  <ChevronDown className="size-4 transition-transform group-data-[state=open]:rotate-180" />
+                </Button>
+              </CollapsibleTrigger>
+              <CollapsibleContent className="px-3 pb-3">
+                <JsonViewer data={request.body} />
+              </CollapsibleContent>
+            </Collapsible>
+          </CardContent>
+        </Card>
+      ) : null}
+
       <Card>
         <CardHeader>
           <CardTitle>Session Timeline ({events.length} events)</CardTitle>
@@ -113,9 +205,7 @@ export default function TimelinePanel({ events }: TimelinePanelProps) {
         <CardContent className="space-y-3">
           {events.map((event, index) => {
             const nextEvent = events[index + 1]
-            const duration = nextEvent
-              ? formatDuration(event.ts, nextEvent.ts)
-              : undefined
+            const duration = getEventDuration(event, nextEvent)
 
             return (
               <Collapsible
@@ -150,7 +240,83 @@ export default function TimelinePanel({ events }: TimelinePanelProps) {
                       <CardHeader className="pb-2">
                         <CardTitle className="text-sm">Details</CardTitle>
                       </CardHeader>
-                      <CardContent>{renderDataTable(event.data)}</CardContent>
+                      <CardContent className="space-y-3">
+                        {event.type === 'prompt_processing' &&
+                        isPromptProcessingData(event.data) ? (
+                          <Table>
+                            <TableBody>
+                              <TableRow>
+                                <TableHead className="w-1/3">
+                                  Total Progress Events
+                                </TableHead>
+                                <TableCell className="font-mono text-xs">
+                                  {event.data.eventCount}
+                                </TableCell>
+                              </TableRow>
+                              <TableRow>
+                                <TableHead className="w-1/3">
+                                  Total Elapsed
+                                </TableHead>
+                                <TableCell className="font-mono text-xs">
+                                  {formatDuration(
+                                    event.data.firstPromptTs,
+                                    event.data.lastPromptTs
+                                  )}{' '}
+                                  ({formatDurationMs(event.data.elapsedMs)})
+                                </TableCell>
+                              </TableRow>
+                              <TableRow>
+                                <TableHead className="w-1/3">
+                                  Final Progress
+                                </TableHead>
+                                <TableCell className="font-mono text-xs">
+                                  {event.data.lastPercent !== undefined
+                                    ? `${event.data.lastPercent}%`
+                                    : 'Unknown'}
+                                </TableCell>
+                              </TableRow>
+                            </TableBody>
+                          </Table>
+                        ) : event.type === 'stream_chunk' &&
+                          isStreamResponseData(event.data) ? (
+                          <>
+                            <Table>
+                              <TableBody>
+                                <TableRow>
+                                  <TableHead className="w-1/3">
+                                    Total Chunks
+                                  </TableHead>
+                                  <TableCell className="font-mono text-xs">
+                                    {event.data.chunkCount}
+                                  </TableCell>
+                                </TableRow>
+                                <TableRow>
+                                  <TableHead className="w-1/3">
+                                    Total Elapsed
+                                  </TableHead>
+                                  <TableCell className="font-mono text-xs">
+                                    {formatDuration(
+                                      event.data.firstChunkTs,
+                                      event.data.lastChunkTs
+                                    )}{' '}
+                                    ({formatDurationMs(event.data.elapsedMs)})
+                                  </TableCell>
+                                </TableRow>
+                              </TableBody>
+                            </Table>
+                            <div className="space-y-2">
+                              <p className="text-xs font-medium text-muted-foreground">
+                                Concatenated Response
+                              </p>
+                              <pre className="max-h-80 max-w-full overflow-auto rounded bg-muted p-3 text-xs whitespace-pre-wrap break-words">
+                                {event.data.responseText || '(empty response)'}
+                              </pre>
+                            </div>
+                          </>
+                        ) : (
+                          renderDataTable(event.data)
+                        )}
+                      </CardContent>
                     </Card>
                     <Separator />
                     <Collapsible className="rounded-md border border-border bg-muted">
@@ -165,9 +331,13 @@ export default function TimelinePanel({ events }: TimelinePanelProps) {
                         </Button>
                       </CollapsibleTrigger>
                       <CollapsibleContent className="px-3 pb-3">
-                        <pre className="max-h-80 overflow-auto rounded bg-muted p-3 text-xs">
-                          {formatJson(event.data)}
-                        </pre>
+                        {event.data === undefined ? (
+                          <p className="text-sm text-muted-foreground">
+                            No payload available.
+                          </p>
+                        ) : (
+                          <JsonViewer data={event.data} />
+                        )}
                       </CollapsibleContent>
                     </Collapsible>
                   </div>

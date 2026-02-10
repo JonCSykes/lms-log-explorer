@@ -1,7 +1,0 @@
-[2024-01-15 10:30:00][INFO] received request
-[2024-01-15 10:30:00][INFO] Received request: POST to /v1/chat/completions with body {"model":"gpt-4","messages":[{"role":"system","content":"You are a helpful assistant."},{"role":"user","content":"Hello!"}],"stream":true}
-[2024-01-15 10:30:01][INFO] Generated packet: {"id":"chatcmpl-abc123","object":"chat.completion.chunk","created":1705316401,"model":"gpt-4","choices":[{"index":0,"delta":{"role":"assistant","content":""},"finish_reason":null}]}
-[2024-01-15 10:30:02][INFO] Generated packet: {"id":"chatcmpl-abc123","object":"chat.completion.chunk","created":1705316402,"model":"gpt-4","choices":[{"index":0,"delta":{"content":"Hello"},"finish_reason":null}]}
-[2024-01-15 10:30:03][INFO] Generated packet: {"id":"chatcmpl-abc123","object":"chat.completion.chunk","created":1705316403,"model":"gpt-4","choices":[{"index":0,"delta":{"content":" how"},"finish_reason":null}]}
-[2024-01-15 10:30:04][INFO] Generated packet: {"id":"chatcmpl-abc123","object":"chat.completion.chunk","created":1705316404,"model":"gpt-4","choices":[{"index":0,"delta":{"content":" can"},"finish_reason":"","usage":{"prompt_tokens":25,"completion_tokens":20,"total_tokens":45}}]}
-[2024-01-15 10:30:04][INFO] Finished streaming response

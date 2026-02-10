@@ -30,7 +30,6 @@ export function extractJsonBlock(message: string): {
 
     if (char === '"' && !inString) {
       inString = true
-      braceCount++
     } else if (char === '"' && inString) {
       inString = false
     } else if (!inString) {
@@ -42,7 +41,7 @@ export function extractJsonBlock(message: string): {
           const jsonStr = message.substring(startIndex, i + 1)
           try {
             return { json: JSON.parse(jsonStr), raw: jsonStr, error: false }
-          } catch (e) {
+          } catch {
             return { raw: jsonStr, error: true }
           }
         }
@@ -50,8 +49,15 @@ export function extractJsonBlock(message: string): {
     }
   }
 
-  // Incomplete JSON - return what we have
+  // Incomplete JSON - try to parse what we have
   const jsonStr = message.substring(startIndex)
+  if (jsonStr.trim()) {
+    try {
+      return { json: JSON.parse(jsonStr), raw: jsonStr, error: false }
+    } catch {
+      return { raw: jsonStr, error: true }
+    }
+  }
   return { raw: jsonStr, error: false }
 }
 
@@ -66,7 +72,7 @@ export function tryParseJson(message: string): object | null {
 
   try {
     return JSON.parse(jsonMatch[0])
-  } catch (e) {
+  } catch {
     return null
   }
 }
@@ -117,7 +123,7 @@ export function createJsonAccumulator(): JsonAccumulator {
             try {
               const json = JSON.parse(buffer.trim())
               return { done: true, json, raw: buffer.trim() }
-            } catch (e) {
+            } catch {
               return { done: true, raw: buffer.trim() }
             }
           }

@@ -15,6 +15,7 @@ import {
   TableHead,
   TableRow,
 } from '@/components/ui/table'
+import { formatDurationMs } from '@/lib/duration'
 
 interface SessionMetrics {
   promptTokens?: number
@@ -33,12 +34,6 @@ export default function MetricsPanel({ metrics }: MetricsPanelProps) {
   const formatNumber = (num?: number) => {
     if (num === undefined) return 'Unknown'
     return num.toLocaleString()
-  }
-
-  const formatDuration = (ms?: number) => {
-    if (ms === undefined) return 'Unknown'
-    const seconds = (ms / 1000).toFixed(2)
-    return `${seconds}s`
   }
 
   const formatTokensPerSecond = (tps?: number) => {
@@ -122,7 +117,7 @@ export default function MetricsPanel({ metrics }: MetricsPanelProps) {
                   <TableRow>
                     <TableHead className="w-1/3">Stream Latency</TableHead>
                     <TableCell>
-                      {formatDuration(metrics.streamLatencyMs)}
+                      {formatDurationMs(metrics.streamLatencyMs)}
                     </TableCell>
                   </TableRow>
                   <TableRow>
@@ -134,7 +129,7 @@ export default function MetricsPanel({ metrics }: MetricsPanelProps) {
                   <TableRow>
                     <TableHead className="w-1/3">Prompt Processing</TableHead>
                     <TableCell>
-                      {formatDuration(metrics.promptProcessingMs)}
+                      {formatDurationMs(metrics.promptProcessingMs)}
                     </TableCell>
                   </TableRow>
                 </TableBody>
