@@ -1,0 +1,232 @@
+import { extractJsonBlock } from './jsonBlock'
+import { type LogLine } from './lineReader'
+
+/**
+ * Event types emitted by parser
+ */
+export type ParserEventType =
+  | 'request_received'
+  | 'prompt_progress'
+  | 'stream_packet'
+  | 'stream_finished'
+  | 'parser_error'
+
+/**
+ * Event emitted during parsing
+ */
+export interface ParserEvent {
+  type: ParserEventType
+  ts: string
+  data?: unknown
+  error?: Error
+}
+
+/**
+ * Request received event with body
+ */
+export interface RequestReceivedEvent extends ParserEvent {
+  type: 'request_received'
+  data: {
+    method: string
+    endpoint: string
+    body: Record<string, unknown>
+  }
+}
+
+/**
+ * Prompt progress event
+ */
+export interface PromptProgressEvent extends ParserEvent {
+  type: 'prompt_progress'
+  data: {
+    percent: number
+  }
+}
+
+/**
+ * Stream packet event with raw JSON
+ */
+export interface StreamPacketEvent extends ParserEvent {
+  type: 'stream_packet'
+  data: {
+    packetId: string
+    rawJson: string
+    model?: string
+  }
+}
+
+/**
+ * Stream finished event
+ */
+export interface StreamFinishedEvent extends ParserEvent {
+  type: 'stream_finished'
+}
+
+/**
+ * Parser error event
+ */
+export interface ParserErrorEvent extends ParserEvent {
+  type: 'parser_error'
+  data: {
+    snippet: string
+    lineTs: string
+  }
+}
+
+/**
+ * Metadata about a tool call delta
+ */
+export interface ToolCallDelta {
+  id: string
+  type: 'function'
+  function: {
+    name?: string
+    arguments?: string
+  }
+}
+
+/**
+ * Extract tool call deltas from stream packet
+ */
+export function extractToolCalls(
+  packet: Record<string, unknown>
+): ToolCallDelta[] {
+  const choices = packet.choices as StreamChoice[] | undefined
+  if (!choices) {
+    return []
+  }
+
+  const deltas: ToolCallDelta[] = []
+
+  for (const choice of choices) {
+    const deltaContent = choice.delta as DeltaContent | undefined
+    if (!deltaContent?.tool_calls) {
+      continue
+    }
+
+    for (const toolCall of deltaContent.tool_calls) {
+      deltas.push({
+        id: String(toolCall.id),
+        type: toolCall.type as 'function',
+        function: {
+          name: toolCall.function?.name,
+          arguments: toolCall.function?.arguments,
+        },
+      })
+    }
+  }
+
+  return deltas
+}
+
+/**
+ * Stream choice from packet
+ */
+interface StreamChoice {
+  delta: DeltaContent
+  index: number
+}
+
+/**
+ * Content delta from stream
+ */
+interface DeltaContent {
+  role?: 'assistant'
+  content?: string
+  tool_calls?: ToolCallDelta[]
+}
+
+/**
+ * Classify a log line and emit appropriate event
+ */
+export function classifyLogLine(line: LogLine): ParserEvent | null {
+  const message = line.message
+
+  // Check for request
+  if (
+    message.includes('Received request: POST to /v1/chat/completions with body')
+  ) {
+    const { json } = extractRequestJson(message)
+    if (json) {
+      const result: RequestReceivedEvent = {
+        type: 'request_received',
+        ts: line.ts,
+        data: {
+          method: 'POST',
+          endpoint: '/v1/chat/completions',
+          body: json,
+        },
+      }
+      console.log(
+        `[classifyLogLine] MATCHED request_received for line: ${message.substring(0, 80)}`
+      )
+      return result
+    }
+  }
+
+  // Check for prompt progress
+  if (message.includes('Prompt processing progress:')) {
+    const percentMatch = /progress:\s*([\d.]+)%/.exec(message)
+    const percentRaw = percentMatch?.[1]
+    if (percentRaw) {
+      const result: PromptProgressEvent = {
+        type: 'prompt_progress',
+        ts: line.ts,
+        data: { percent: parseFloat(percentRaw) },
+      }
+      console.log(
+        `[classifyLogLine] MATCHED prompt_progress for line: ${message.substring(0, 80)}`
+      )
+      return result
+    }
+  }
+
+  // Check for generated packet
+  if (message.includes('Generated packet:')) {
+    const { json, raw } = extractJsonBlock(message)
+    if (json && typeof json === 'object' && 'id' in json) {
+      const packet = json as { id: unknown; model?: string }
+      const result: StreamPacketEvent = {
+        type: 'stream_packet',
+        ts: line.ts,
+        data: {
+          packetId: String(packet.id),
+          rawJson: raw,
+          model: typeof packet.model === 'string' ? packet.model : undefined,
+        },
+      }
+      console.log(
+        `[classifyLogLine] MATCHED stream_packet for line: ${message.substring(0, 80)}`
+      )
+      return result
+    }
+  }
+
+  // Check for stream finished
+  if (message.includes('Finished streaming response')) {
+    const result: StreamFinishedEvent = {
+      type: 'stream_finished',
+      ts: line.ts,
+    }
+    console.log(
+      `[classifyLogLine] MATCHED stream_finished for line: ${message.substring(0, 80)}`
+    )
+    return result
+  }
+
+  return null
+}
+
+/**
+ * Extract JSON from request message
+ */
+export function extractRequestJson(message: string): {
+  json?: Record<string, unknown>
+  raw: string
+} {
+  const { json, raw } = extractJsonBlock(message)
+  if (json && message.includes('with body {')) {
+    return { json: json as Record<string, unknown>, raw }
+  }
+  return { raw }
+}
