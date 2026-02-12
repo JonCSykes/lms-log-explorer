@@ -166,3 +166,143 @@
 - `pnpm lint`: passes (zero warnings, zero errors).
 - `pnpm type-check`: passes.
 - `pnpm format:check`: passes.
+
+## 2026-02-12
+
+### Session Grouping: Date -> Session -> Request
+
+- Added parser-level session identity extraction from request `body.messages` first two entries:
+  - deterministic checksum for system message
+  - deterministic checksum for user message
+  - client inference from system message (`Opencode` when message contains
+    `You are opencode, an interactive CLI tool`, otherwise `Unknown`)
+- Introduced parent session grouping metadata and aggregates:
+  - per-request metadata (`sessionGroupId`, `sessionGroupKey`, checksums, client)
+  - per-parent aggregates (request count, total input/output tokens, average
+    tokens/sec, total prompt processing time, model/client rollups)
+- Updated session list/index APIs and hooks so each request carries parent
+  session summary data for UI grouping and display.
+- Updated sidebar hierarchy from `Date -> Request` to `Date -> Session -> Request`.
+
+### Detail Pane UX: Remove Tabs, Show Session + Request Data Together
+
+- Removed tabbed layout from the main content area.
+- Replaced former tabs container with a **Session Overview** card showing:
+  - model
+  - client
+  - request count
+  - total input/output tokens
+  - average tokens/sec
+  - total prompt processing time
+- Moved request-level metrics and tool calls into the **Request Data** card in
+  `TimelinePanel`.
+- Tool calls are now minimized by default via collapsible sections.
+
+### Validation Summary (Session Grouping + UI Restructure)
+
+- `pnpm type-check`: passes.
+- Targeted ESLint on changed files: no errors (one existing warning remains in
+  `lib/indexer/sqliteStore.ts` for `import/no-named-as-default` on
+  `better-sqlite3` default import).
+
+### Parser Guard: Request Anchor Enforcement
+
+- Fixed parser bug where non-request logs could start or populate a request
+  session without a `Request Received` anchor.
+- New parser behavior:
+  - only `request_received` can start a session
+  - prompt/stream/finish events are ignored when no active request exists
+  - prompt/stream/finish events are only attached when
+    `event.ts >= request_received.ts`
+  - sessions are discarded unless first timeline event is `request`
+
+### Validation Summary (Request Anchor Enforcement)
+
+- `pnpm type-check`: passes.
+- `pnpm exec eslint lib/parser/sessionBuilder.ts`: passes.
+
+### Parser Guard: Keep Request Open Through Tail Logs
+
+- Updated request finalization timing to avoid orphaning late request logs:
+  - `stream_finished` no longer immediately finalizes the request session.
+  - requests now finalize on the next `request_received` boundary or EOF.
+- This preserves the request anchor while ensuring trailing logs stay attached
+  to the same parent request instead of getting dropped.
+
+### Validation Summary (Tail Log Attachment)
+
+- `pnpm type-check`: passes.
+- `pnpm exec eslint lib/parser/sessionBuilder.ts`: passes.
+
+### SQLite Root Cause + Stitch Fix
+
+- Investigated SQLite index row causing mis-grouping:
+  - `session_id=session-473a1a93fb75-0001`
+  - `source_path=.../2026-02-09.13.log`
+  - `request_json=NULL` with only trailing prompt/tool/stream events
+  - This produced fallback grouping (`request:<sessionId>`) and surfaced as
+    `session-group-9a4812807db4` instead of joining the prior request chain.
+- Added index-time orphan stitching:
+  - orphan sessions (`no request`, `has events`) are merged into the nearest
+    prior anchored request session by timestamp.
+  - merged orphan sessions are skipped as standalone requests in both
+    persisted-load and fresh parse indexing paths.
+- Parser now captures pre-request fragments (instead of dropping) so the stitch
+  step can attach them to the correct parent request session.
+
+### Validation Summary (SQLite Stitch)
+
+- `pnpm type-check`: passes.
+- `pnpm exec eslint lib/parser/sessionBuilder.ts lib/indexer/index.ts`: passes.
+
+### Parser Classification Hardening (Request vs Stream Payload)
+
+- Fixed false `request_received` classification caused by substring matching:
+  - before: any line containing `Received request: POST ...` could be marked as
+    request, even when that text appeared inside streamed tool-call arguments.
+  - after: request/packet/finish classification uses anchored prefixes:
+    - `^Received request: POST to /v1/chat/completions with body {`
+    - `^Generated packet: {`
+    - `^Finished streaming response`
+- Added request-schema guard for request classification:
+  - require parsed request body to contain `messages[]`.
+- Updated multiline JSON start detection to use the same anchored request/packet
+  message checks so continuation merging does not trigger on embedded strings.
+
+### Validation Summary (Classification Hardening)
+
+- `pnpm type-check`: passes.
+- `pnpm exec eslint lib/parser/events.ts lib/parser/sessionBuilder.ts`: passes.
+
+### Force Refresh Reparse Semantics
+
+- Updated forced index rebuild behavior to reparse all log files (not only
+  changed/latest), so parser fixes are applied to historical SQLite entries.
+- Added `reparseAll` option in indexer build path and wired it from
+  `initializeSessionIndex({ forceRefresh: true })`.
+
+### Validation Summary (Force Reparse)
+
+- `pnpm type-check`: passes.
+- `pnpm exec eslint lib/indexer/index.ts lib/sessionIndex.ts`: passes.
+
+### Client Detection + Sidebar Client Icons
+
+- Added client detection support for additional system-message signatures:
+  - `Codex` when system prompt contains `You are Codex`
+  - `Claude` when system prompt contains
+    `The assistant is Claude, created by Anthropic.`
+- Preserved `Opencode` detection and fallback to `Unknown`.
+- Expanded `ClientType` to include `Opencode | Codex | Claude | Unknown`.
+- Sidebar parent session icon now uses client-specific image assets instead of a
+  folder icon:
+  - `/images/opencode.svg`
+  - `/images/codex.svg`
+  - `/images/claude.svg`
+- Added image `alt` text using the client name, and removed client text from
+  the subtitle line (subtitle now model + request count).
+
+### Validation Summary (Client + Sidebar Icons)
+
+- `pnpm type-check`: passes.
+- `pnpm exec eslint` on changed parser/sidebar/hook/index files: passes.

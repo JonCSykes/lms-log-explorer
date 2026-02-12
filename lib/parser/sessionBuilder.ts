@@ -1,10 +1,17 @@
+import * as crypto from 'node:crypto'
+
+import { type ClientType } from '../../types/types'
+
 import {
   type ParserEvent,
   type PromptProcessingEvent,
   type RequestReceivedEvent,
+  type RequestReceivedEventData,
   type StreamPacketEvent,
   classifyLogLine,
   extractToolCalls,
+  isGeneratedPacketMessage,
+  isRequestLineMessage,
 } from './events'
 import { type LogLine } from './lineReader'
 import { TimingTracker, parseTimestampMs } from './metrics'
@@ -13,7 +20,10 @@ import { ToolCallMerger, parseToolCallArguments } from './toolCalls'
 export interface SessionData {
   chatId?: string
   model?: string
+  client: ClientType
   firstSeenAt: string
+  systemMessageChecksum?: string
+  userMessageChecksum?: string
   request?: RequestReceivedEvent
   events: TimelineEvent[]
   toolCalls: ToolCallData[]
@@ -57,7 +67,10 @@ interface BuildAsyncOptions {
 interface SessionState {
   chatId?: string
   model?: string
+  client: ClientType
   firstSeenAt: string
+  systemMessageChecksum?: string
+  userMessageChecksum?: string
   request?: RequestReceivedEvent
   events: TimelineEvent[]
   promptAccumulator: PromptAccumulator
@@ -86,12 +99,119 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null
 }
 
-function isJsonEventStart(message: string): boolean {
-  return (
-    message.includes(
-      'Received request: POST to /v1/chat/completions with body'
-    ) || message.includes('Generated packet:')
+function stableSerialize(value: unknown): string {
+  if (value === null || typeof value !== 'object') {
+    return JSON.stringify(value)
+  }
+
+  if (Array.isArray(value)) {
+    return `[${value.map((item) => stableSerialize(item)).join(',')}]`
+  }
+
+  const sortedEntries = Object.entries(value as Record<string, unknown>).sort(
+    ([left], [right]) => left.localeCompare(right)
   )
+
+  const serializedEntries = sortedEntries.map(
+    ([key, nestedValue]) => `${JSON.stringify(key)}:${stableSerialize(nestedValue)}`
+  )
+
+  return `{${serializedEntries.join(',')}}`
+}
+
+function checksumForMessage(message: unknown): string | undefined {
+  if (!isRecord(message)) {
+    return undefined
+  }
+
+  return crypto
+    .createHash('sha1')
+    .update(stableSerialize(message))
+    .digest('hex')
+}
+
+function extractTextFragments(value: unknown): string[] {
+  if (typeof value === 'string') {
+    return [value]
+  }
+
+  if (Array.isArray(value)) {
+    return value.flatMap((item) => extractTextFragments(item))
+  }
+
+  if (!isRecord(value)) {
+    return []
+  }
+
+  const fragments: string[] = []
+  for (const [key, nestedValue] of Object.entries(value)) {
+    if (
+      (key === 'text' || key === 'content') &&
+      typeof nestedValue === 'string' &&
+      nestedValue.length > 0
+    ) {
+      fragments.push(nestedValue)
+      continue
+    }
+
+    fragments.push(...extractTextFragments(nestedValue))
+  }
+
+  return fragments
+}
+
+function detectClientFromSystemMessage(systemMessage: unknown): ClientType {
+  if (!isRecord(systemMessage)) {
+    return 'Unknown'
+  }
+
+  const fragments = extractTextFragments(systemMessage.content)
+  const joinedContent = fragments.join('\n')
+  if (joinedContent.includes('You are opencode, an interactive CLI tool')) {
+    return 'Opencode'
+  }
+  if (joinedContent.includes('You are Codex')) {
+    return 'Codex'
+  }
+  if (
+    joinedContent.includes(
+      'The assistant is Claude, created by Anthropic.'
+    )
+  ) {
+    return 'Claude'
+  }
+
+  return 'Unknown'
+}
+
+function applyRequestMetadata(
+  state: SessionState,
+  requestData: RequestReceivedEventData
+): void {
+  const body = requestData.body
+  if (typeof body.model === 'string' && !state.model) {
+    state.model = body.model
+  }
+
+  const messages = body.messages
+  if (!Array.isArray(messages)) {
+    return
+  }
+
+  const firstMessage = messages[0]
+  const secondMessage = messages[1]
+  if (isRecord(firstMessage) && firstMessage.role === 'system') {
+    state.systemMessageChecksum = checksumForMessage(firstMessage)
+    state.client = detectClientFromSystemMessage(firstMessage)
+  }
+
+  if (isRecord(secondMessage) && secondMessage.role === 'user') {
+    state.userMessageChecksum = checksumForMessage(secondMessage)
+  }
+}
+
+function isJsonEventStart(message: string): boolean {
+  return isRequestLineMessage(message) || isGeneratedPacketMessage(message)
 }
 
 interface JsonBalanceState {
@@ -364,21 +484,49 @@ function processEvent(
   }
 
   if (event.type === 'stream_packet') {
-    const nextSession =
-      currentSession ?? createSession((event as StreamPacketEvent).ts)
-    processStreamPacket(nextSession, event as StreamPacketEvent)
-    return nextSession
+    if (!currentSession) {
+      const nextSession = createSession((event as StreamPacketEvent).ts)
+      processStreamPacket(nextSession, event as StreamPacketEvent)
+      return nextSession
+    }
+
+    if (!isEventAttachableToCurrentRequest(currentSession, event.ts)) {
+      return currentSession
+    }
+
+    processStreamPacket(currentSession, event as StreamPacketEvent)
+    return currentSession
   }
 
   if (event.type === 'prompt_processing') {
-    const nextSession = currentSession ?? createSession(event.ts)
-    processPromptProcessing(nextSession, event as PromptProcessingEvent)
-    return nextSession
+    if (!currentSession) {
+      const nextSession = createSession(event.ts)
+      processPromptProcessing(nextSession, event as PromptProcessingEvent)
+      return nextSession
+    }
+
+    if (!isEventAttachableToCurrentRequest(currentSession, event.ts)) {
+      return currentSession
+    }
+
+    processPromptProcessing(currentSession, event as PromptProcessingEvent)
+    return currentSession
   }
 
   if (event.type === 'stream_finished') {
     if (!currentSession) {
-      return null
+      const nextSession = createSession(event.ts)
+      nextSession.events.push({
+        id: `stream-finished-${event.ts}`,
+        type: 'stream_finished',
+        ts: event.ts,
+      })
+      nextSession.timingTracker.recordStreamFinished(event.ts)
+      return nextSession
+    }
+
+    if (!isEventAttachableToCurrentRequest(currentSession, event.ts)) {
+      return currentSession
     }
 
     flushPromptAccumulator(currentSession)
@@ -389,8 +537,7 @@ function processEvent(
       ts: event.ts,
     })
     currentSession.timingTracker.recordStreamFinished(event.ts)
-    finalizeSession(sessions, currentSession)
-    return null
+    return currentSession
   }
 
   return currentSession
@@ -400,10 +547,13 @@ function createSession(
   firstSeenAt: string,
   request?: RequestReceivedEvent
 ): SessionState {
-  return {
+  const state: SessionState = {
     chatId: undefined,
     model: undefined,
+    client: 'Unknown',
     firstSeenAt,
+    systemMessageChecksum: undefined,
+    userMessageChecksum: undefined,
     request,
     events: [],
     promptAccumulator: {
@@ -423,6 +573,12 @@ function createSession(
     toolCallMerger: new ToolCallMerger(),
     timingTracker: new TimingTracker(),
   }
+
+  if (request) {
+    applyRequestMetadata(state, request.data)
+  }
+
+  return state
 }
 
 function finalizeSession(sessions: SessionData[], state: SessionState): void {
@@ -444,12 +600,30 @@ function finalizeSession(sessions: SessionData[], state: SessionState): void {
   sessions.push({
     chatId: state.chatId,
     model: state.model,
+    client: state.client,
     firstSeenAt: state.firstSeenAt,
+    systemMessageChecksum: state.systemMessageChecksum,
+    userMessageChecksum: state.userMessageChecksum,
     request: state.request,
     events: state.events,
     toolCalls,
     metrics: computeMetrics(state.timingTracker, state.events),
   })
+}
+
+function isEventAttachableToCurrentRequest(
+  currentSession: SessionState | null,
+  eventTs: string
+): currentSession is SessionState {
+  if (!currentSession) {
+    return false
+  }
+
+  if (!currentSession.request) {
+    return true
+  }
+
+  return parseTimestampMs(eventTs) >= parseTimestampMs(currentSession.request.ts)
 }
 
 function processStreamPacket(

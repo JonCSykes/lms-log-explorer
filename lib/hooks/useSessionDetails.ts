@@ -2,6 +2,8 @@
 
 import { useEffect, useState } from 'react'
 
+import { type ClientType } from '@/types'
+
 interface SessionResponse {
   session: SessionData | null
   message?: string
@@ -12,10 +14,27 @@ interface SessionData {
   chatId?: string
   firstSeenAt: string
   model?: string
+  client?: ClientType
+  sessionGroupId?: string
+  sessionGroupKey?: string
+  sessionGroup?: SessionGroupSummary
   request?: RequestData
   events: TimelineEvent[]
   toolCalls: ToolCallItem[]
   metrics: SessionMetrics
+}
+
+interface SessionGroupSummary {
+  sessionGroupId: string
+  sessionGroupKey: string
+  sessionStartedAt: string
+  sessionModel?: string
+  sessionClient: ClientType
+  sessionRequestCount: number
+  sessionTotalInputTokens?: number
+  sessionTotalOutputTokens?: number
+  sessionAverageTokensPerSecond?: number
+  sessionTotalPromptProcessingMs?: number
 }
 
 interface RequestData {
@@ -76,6 +95,8 @@ interface ToolCallItem {
   name: string
   argumentsText: string
   argumentsJson?: Record<string, unknown>
+  requestedAt?: string
+  durationMs?: number
 }
 
 interface SessionMetrics {
@@ -93,7 +114,12 @@ export function useSessionDetails(sessionId: string) {
   const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
-    if (!sessionId) return
+    if (!sessionId) {
+      setData(null)
+      setError(null)
+      setLoading(false)
+      return
+    }
 
     async function fetchSession() {
       try {
