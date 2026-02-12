@@ -17,10 +17,16 @@ export interface ParserEvent {
 
 export interface RequestReceivedEvent extends ParserEvent {
   type: 'request_received'
-  data: {
-    method: string
-    endpoint: string
-    body: Record<string, unknown>
+  data: RequestReceivedEventData
+}
+
+export interface RequestReceivedEventData {
+  method: string
+  endpoint: string
+  body: {
+    model?: unknown
+    messages?: unknown
+    [key: string]: unknown
   }
 }
 
@@ -69,6 +75,29 @@ interface StreamChoice {
     tool_calls?: Array<Record<string, unknown>>
   }
   index?: number
+}
+
+const REQUEST_LINE_REGEX =
+  /^Received request: POST to \/v1\/chat\/completions with body\s*\{/
+const PACKET_LINE_REGEX = /^Generated packet:\s*\{/
+const STREAM_FINISHED_PREFIX = 'Finished streaming response'
+
+export function isRequestLineMessage(message: string): boolean {
+  return REQUEST_LINE_REGEX.test(message)
+}
+
+export function isGeneratedPacketMessage(message: string): boolean {
+  return PACKET_LINE_REGEX.test(message)
+}
+
+function isStreamFinishedMessage(message: string): boolean {
+  return message.startsWith(STREAM_FINISHED_PREFIX)
+}
+
+function isChatCompletionsRequestBody(
+  value: Record<string, unknown>
+): boolean {
+  return Array.isArray(value.messages)
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -125,11 +154,9 @@ export function extractToolCalls(
 export function classifyLogLine(line: LogLine): ParserEvent | null {
   const message = line.message
 
-  if (
-    message.includes('Received request: POST to /v1/chat/completions with body')
-  ) {
+  if (isRequestLineMessage(message)) {
     const { json } = extractRequestJson(message)
-    if (json) {
+    if (json && isChatCompletionsRequestBody(json)) {
       return {
         type: 'request_received',
         ts: line.ts,
@@ -154,7 +181,7 @@ export function classifyLogLine(line: LogLine): ParserEvent | null {
     }
   }
 
-  if (message.includes('Generated packet:')) {
+  if (isGeneratedPacketMessage(message)) {
     const { json, raw } = extractJsonBlock(message)
     if (isRecord(json) && typeof json.id === 'string') {
       return {
@@ -169,7 +196,7 @@ export function classifyLogLine(line: LogLine): ParserEvent | null {
     }
   }
 
-  if (message.includes('Finished streaming response')) {
+  if (isStreamFinishedMessage(message)) {
     return {
       type: 'stream_finished',
       ts: line.ts,
@@ -184,7 +211,7 @@ export function extractRequestJson(message: string): {
   raw: string
 } {
   const { json, raw } = extractJsonBlock(message)
-  if (isRecord(json) && message.includes('with body {')) {
+  if (isRecord(json) && isRequestLineMessage(message)) {
     return { json, raw }
   }
 

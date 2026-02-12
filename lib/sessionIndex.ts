@@ -60,7 +60,7 @@ export async function initializeSessionIndex(
   }
 
   const shouldForceRefresh = options?.forceRefresh === true
-  if (!shouldForceRefresh && sessionIndex && sessionIndex.sessions.size > 0) {
+  if (!shouldForceRefresh && sessionIndex.sessions.size > 0) {
     return sessionIndex
   }
 
@@ -74,11 +74,12 @@ export async function initializeSessionIndex(
   indexingStatus.finishedAt = undefined
   indexingStatus.processedFiles = 0
   indexingStatus.totalFiles = 0
-  indexingStatus.sessionsIndexed = sessionIndex?.sessions.size || 0
+  indexingStatus.sessionsIndexed = sessionIndex.sessions.size
   indexingStatus.currentFile = undefined
 
   inFlightBuild = (async () => {
     const index = await buildIndex(undefined, {
+      reparseAll: shouldForceRefresh,
       onProgress: (progress) => {
         updateStatusFromProgress(progress)
       },

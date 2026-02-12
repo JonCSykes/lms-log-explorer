@@ -1,6 +1,6 @@
 import { type NextRequest, NextResponse } from 'next/server'
 
-import { getSession } from '@/lib/indexer'
+import { getSession, getSessionGroupSummary } from '@/lib/indexer'
 import {
   getIndexingStatus,
   getSessionIndex,
@@ -23,6 +23,7 @@ export async function GET(request: NextRequest) {
     const index = await getSessionIndex()
     const session = getSession(index, sessionIdOrChatId)
     if (session) {
+      const sessionGroup = getSessionGroupSummary(index, session.sessionGroupId)
       const toolCalls = session.toolCalls.map((toolCall) => ({
         id: toolCall.id,
         name: toolCall.name,
@@ -37,6 +38,12 @@ export async function GET(request: NextRequest) {
           chatId: session.chatId,
           firstSeenAt: session.firstSeenAt,
           model: session.model,
+          client: session.client,
+          sessionGroupId: session.sessionGroupId,
+          sessionGroupKey: session.sessionGroupKey,
+          systemMessageChecksum: session.systemMessageChecksum,
+          userMessageChecksum: session.userMessageChecksum,
+          sessionGroup,
           request: session.request,
           events: session.events,
           toolCalls,

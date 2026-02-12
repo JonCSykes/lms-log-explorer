@@ -2,18 +2,63 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 
+import { type AiSessionRenamerSettingsResponse } from '@/lib/ai/settings'
+import { type ClientType } from '@/types'
+
 interface Session {
   sessionId: string
   chatId?: string
   firstSeenAt: string
+  requestStartedAt?: string
+  requestEndedAt?: string
+  requestElapsedMs?: number
+  requestPromptProcessingMs?: number
+  requestToolCallCount?: number
+  requestTokensPerSecond?: number
   model?: string
+  promptTokens?: number
+  completionTokens?: number
+  streamLatencyMs?: number
+  client: ClientType
+  sessionGroupId: string
+  sessionGroupKey: string
+  sessionName?: string
+  sessionStartedAt: string
+  sessionModel?: string
+  sessionClient: ClientType
+  sessionRequestCount: number
+  sessionTotalInputTokens?: number
+  sessionTotalOutputTokens?: number
+  sessionAverageTokensPerSecond?: number
+  sessionTotalPromptProcessingMs?: number
 }
 
 interface ApiSession {
   sessionId: string
   chatId?: string
   firstSeenAt: string
+  requestStartedAt?: string
+  requestEndedAt?: string
+  requestElapsedMs?: number
+  requestPromptProcessingMs?: number
+  requestToolCallCount?: number
+  requestTokensPerSecond?: number
   model?: string
+  promptTokens?: number
+  completionTokens?: number
+  streamLatencyMs?: number
+  client: ClientType
+  sessionGroupId: string
+  sessionGroupKey: string
+  sessionName?: string
+  sessionStartedAt: string
+  sessionModel?: string
+  sessionClient: ClientType
+  sessionRequestCount: number
+  sessionTotalInputTokens?: number
+  sessionTotalOutputTokens?: number
+  sessionAverageTokensPerSecond?: number
+  sessionTotalPromptProcessingMs?: number
 }
 
 type IndexingState = 'idle' | 'indexing' | 'ready' | 'error'
@@ -41,6 +86,7 @@ interface IndexStatusResponse {
 
 const POLL_MS = 1000
 const SESSIONS_PAGE_SIZE = 500
+const RENAMER_LIVE_REFRESH_MS = 1200
 
 export function useSessions() {
   const [sessions, setSessions] = useState<Session[]>([])
@@ -48,6 +94,7 @@ export function useSessions() {
   const [error, setError] = useState<string | null>(null)
   const [status, setStatus] = useState<IndexStatus | null>(null)
   const pollTimerRef = useRef<ReturnType<typeof setInterval> | null>(null)
+  const renamerRunKeyRef = useRef<string | null>(null)
 
   const fetchSessions = useCallback(async () => {
     let offset = 0
@@ -83,7 +130,28 @@ export function useSessions() {
         sessionId: session.sessionId,
         chatId: session.chatId,
         firstSeenAt: session.firstSeenAt,
+        requestStartedAt: session.requestStartedAt,
+        requestEndedAt: session.requestEndedAt,
+        requestElapsedMs: session.requestElapsedMs,
+        requestPromptProcessingMs: session.requestPromptProcessingMs,
+        requestToolCallCount: session.requestToolCallCount,
+        requestTokensPerSecond: session.requestTokensPerSecond,
         model: session.model,
+        promptTokens: session.promptTokens,
+        completionTokens: session.completionTokens,
+        streamLatencyMs: session.streamLatencyMs,
+        client: session.client,
+        sessionGroupId: session.sessionGroupId,
+        sessionGroupKey: session.sessionGroupKey,
+        sessionName: session.sessionName,
+        sessionStartedAt: session.sessionStartedAt,
+        sessionModel: session.sessionModel,
+        sessionClient: session.sessionClient,
+        sessionRequestCount: session.sessionRequestCount,
+        sessionTotalInputTokens: session.sessionTotalInputTokens,
+        sessionTotalOutputTokens: session.sessionTotalOutputTokens,
+        sessionAverageTokensPerSecond: session.sessionAverageTokensPerSecond,
+        sessionTotalPromptProcessingMs: session.sessionTotalPromptProcessingMs,
       }))
     )
 
@@ -117,6 +185,77 @@ export function useSessions() {
     }
   }, [])
 
+  const maybeRunSessionRenamer = useCallback(
+    async (nextStatus: IndexStatus | null | undefined) => {
+      try {
+        if (nextStatus?.state !== 'ready') {
+          return
+        }
+
+        const settingsResponse = await fetch('/api/settings')
+        if (!settingsResponse.ok) {
+          return
+        }
+
+        const settingsData =
+          (await settingsResponse.json()) as AiSessionRenamerSettingsResponse
+        if (!settingsData.settings.enableSessionRenamer) {
+          return
+        }
+
+        const runKey =
+          nextStatus.finishedAt || `${nextStatus.sessionsIndexed}:${nextStatus.state}`
+        if (renamerRunKeyRef.current === runKey) {
+          return
+        }
+
+        renamerRunKeyRef.current = runKey
+
+        let refreshInFlight = false
+        const liveRefreshTimer = setInterval(() => {
+          void (async () => {
+            if (refreshInFlight) {
+              return
+            }
+
+            refreshInFlight = true
+            try {
+              await fetchSessions()
+            } catch (refreshError) {
+              console.error('Failed to refresh sessions during renamer run:', refreshError)
+            } finally {
+              refreshInFlight = false
+            }
+          })()
+        }, RENAMER_LIVE_REFRESH_MS)
+
+        try {
+          const renameResponse = await fetch('/api/session-renamer/run', {
+            method: 'POST',
+          })
+          if (!renameResponse.ok) {
+            return
+          }
+
+          const renameResult = (await renameResponse.json()) as {
+            updatedCount?: number
+          }
+          if ((renameResult.updatedCount || 0) > 0) {
+            await fetchSessions()
+            return
+          }
+
+          await fetchSessions()
+        } finally {
+          clearInterval(liveRefreshTimer)
+        }
+      } catch (error) {
+        console.error('Failed to run session renamer:', error)
+      }
+    },
+    [fetchSessions]
+  )
+
   const startPolling = useCallback(() => {
     if (pollTimerRef.current) {
       return
@@ -137,12 +276,13 @@ export function useSessions() {
 
         if (nextStatus.state === 'ready' || nextStatus.state === 'error') {
           await fetchSessions()
+          await maybeRunSessionRenamer(nextStatus)
           stopPolling()
           setLoading(false)
         }
       })()
     }, POLL_MS)
-  }, [fetchSessions, fetchStatus, stopPolling])
+  }, [fetchSessions, fetchStatus, maybeRunSessionRenamer, stopPolling])
 
   const bootstrap = useCallback(async () => {
     try {
@@ -157,12 +297,14 @@ export function useSessions() {
         startPolling()
       }
 
+      await maybeRunSessionRenamer(nextStatus)
+
       setLoading(false)
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Unknown error')
       setLoading(false)
     }
-  }, [fetchSessions, fetchStatus, startPolling])
+  }, [fetchSessions, fetchStatus, maybeRunSessionRenamer, startPolling])
 
   useEffect(() => {
     void bootstrap()
@@ -182,12 +324,13 @@ export function useSessions() {
       if (nextStatus?.state === 'indexing') {
         startPolling()
       }
+      await maybeRunSessionRenamer(nextStatus)
       setLoading(false)
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Unknown error')
       setLoading(false)
     }
-  }, [fetchSessions, fetchStatus, startPolling])
+  }, [fetchSessions, fetchStatus, maybeRunSessionRenamer, startPolling])
 
   const progress = useMemo(() => {
     if (!status || status.totalFiles <= 0) {

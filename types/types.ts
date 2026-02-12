@@ -10,6 +10,11 @@
 export type Timestamp = string
 
 /**
+ * Identified request client source.
+ */
+export type ClientType = 'Opencode' | 'Codex' | 'Claude' | 'Unknown'
+
+/**
  * Chat session from LM Studio logs
  */
 export interface Session {
@@ -28,6 +33,31 @@ export interface Session {
    * Timestamp of first event in session
    */
   firstSeenAt: Timestamp
+
+  /**
+   * Parent session grouping key derived from system+user message checksums.
+   */
+  sessionGroupKey: string
+
+  /**
+   * Stable identifier for grouped sessions in the UI.
+   */
+  sessionGroupId: string
+
+  /**
+   * Client inferred from request system prompt.
+   */
+  client: ClientType
+
+  /**
+   * System message checksum used for session grouping.
+   */
+  systemMessageChecksum?: string
+
+  /**
+   * User message checksum used for session grouping.
+   */
+  userMessageChecksum?: string
 
   /**
    * Model name (e.g., "gpt-4")
@@ -222,10 +252,30 @@ export interface SessionsListItem {
   chatId: string
   sessionId: string
   firstSeenAt: Timestamp
+  requestStartedAt?: Timestamp
+  requestEndedAt?: Timestamp
+  requestElapsedMs?: number
+  requestPromptProcessingMs?: number
+  requestToolCallCount?: number
+  requestTokensPerSecond?: number
   model?: string
   promptTokens?: number
   completionTokens?: number
   streamLatencyMs?: number
+  client: ClientType
+  sessionGroupId: string
+  sessionGroupKey: string
+  sessionName?: string
+  systemMessageChecksum?: string
+  userMessageChecksum?: string
+  sessionStartedAt: Timestamp
+  sessionModel?: string
+  sessionClient: ClientType
+  sessionRequestCount: number
+  sessionTotalInputTokens?: number
+  sessionTotalOutputTokens?: number
+  sessionAverageTokensPerSecond?: number
+  sessionTotalPromptProcessingMs?: number
 }
 
 /**

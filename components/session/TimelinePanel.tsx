@@ -53,15 +53,41 @@ interface PromptProcessingData {
 interface TimelinePanelProps {
   events: TimelineEvent[]
   request?: RequestData
+  metrics?: SessionMetrics
+  toolCalls?: ToolCall[]
 }
 
 interface RequestData {
+  ts?: string
   endpoint: string
   method: string
   body: Record<string, unknown>
 }
 
-export default function TimelinePanel({ events, request }: TimelinePanelProps) {
+interface SessionMetrics {
+  promptTokens?: number
+  completionTokens?: number
+  totalTokens?: number
+  promptProcessingMs?: number
+  streamLatencyMs?: number
+  tokensPerSecond?: number
+}
+
+interface ToolCall {
+  id: string
+  name: string
+  argumentsText: string
+  argumentsJson?: Record<string, unknown>
+  requestedAt?: string
+  durationMs?: number
+}
+
+export default function TimelinePanel({
+  events,
+  request,
+  metrics,
+  toolCalls = [],
+}: TimelinePanelProps) {
   const formatTime = (ts: string) => {
     const date = new Date(ts)
     if (Number.isNaN(date.getTime())) return ts
@@ -147,6 +173,40 @@ export default function TimelinePanel({ events, request }: TimelinePanelProps) {
     stream_finished: 'Stream Finished',
   }
 
+  const requestElapsedMs = (() => {
+    if (events.length === 0) {
+      return undefined
+    }
+
+    let earliestEventMs = Number.POSITIVE_INFINITY
+    let latestEventMs = Number.NEGATIVE_INFINITY
+    for (const event of events) {
+      const eventMs = new Date(event.ts).getTime()
+      if (!Number.isFinite(eventMs)) {
+        continue
+      }
+      if (eventMs < earliestEventMs) {
+        earliestEventMs = eventMs
+      }
+      if (eventMs > latestEventMs) {
+        latestEventMs = eventMs
+      }
+    }
+
+    const startTs =
+      request?.ts ||
+      events.find((event) => event.type === 'request')?.ts ||
+      (Number.isFinite(earliestEventMs) ? new Date(earliestEventMs).toISOString() : undefined)
+    const startMs = startTs ? new Date(startTs).getTime() : Number.NaN
+    const endMs = Number.isFinite(latestEventMs) ? latestEventMs : Number.NaN
+
+    if (!Number.isFinite(startMs) || !Number.isFinite(endMs)) {
+      return undefined
+    }
+
+    return Math.max(0, endMs - startMs)
+  })()
+
   return (
     <div className="space-y-4">
       {request ? (
@@ -176,8 +236,105 @@ export default function TimelinePanel({ events, request }: TimelinePanelProps) {
                       : 0}
                   </TableCell>
                 </TableRow>
+                <TableRow>
+                  <TableHead className="w-1/3">input tokens</TableHead>
+                  <TableCell className="font-mono text-xs">
+                    {metrics?.promptTokens?.toLocaleString() || 'Unknown'}
+                  </TableCell>
+                </TableRow>
+                <TableRow>
+                  <TableHead className="w-1/3">output tokens</TableHead>
+                  <TableCell className="font-mono text-xs">
+                    {metrics?.completionTokens?.toLocaleString() || 'Unknown'}
+                  </TableCell>
+                </TableRow>
+                <TableRow>
+                  <TableHead className="w-1/3">tokens / second</TableHead>
+                  <TableCell className="font-mono text-xs">
+                    {metrics?.tokensPerSecond !== undefined
+                      ? metrics.tokensPerSecond.toFixed(2)
+                      : 'Unknown'}
+                  </TableCell>
+                </TableRow>
+                <TableRow>
+                  <TableHead className="w-1/3">prompt processing</TableHead>
+                  <TableCell className="font-mono text-xs">
+                    {formatDurationMs(metrics?.promptProcessingMs)}
+                  </TableCell>
+                </TableRow>
+                <TableRow>
+                  <TableHead className="w-1/3">stream latency</TableHead>
+                  <TableCell className="font-mono text-xs">
+                    {formatDurationMs(metrics?.streamLatencyMs)}
+                  </TableCell>
+                </TableRow>
+                <TableRow>
+                  <TableHead className="w-1/3">total request time</TableHead>
+                  <TableCell className="font-mono text-xs">
+                    {formatDurationMs(requestElapsedMs)}
+                  </TableCell>
+                </TableRow>
               </TableBody>
             </Table>
+
+            <Collapsible
+              defaultOpen={false}
+              className="rounded-md border border-border bg-muted"
+            >
+              <CollapsibleTrigger asChild>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="group w-full justify-between"
+                >
+                  Tool Calls ({toolCalls.length})
+                  <ChevronDown className="size-4 transition-transform group-data-[state=open]:rotate-180" />
+                </Button>
+              </CollapsibleTrigger>
+              <CollapsibleContent className="space-y-2 px-3 pb-3">
+                {toolCalls.length === 0 ? (
+                  <p className="text-sm text-muted-foreground">
+                    No tool calls found
+                  </p>
+                ) : (
+                  toolCalls.map((toolCall) => (
+                    <Collapsible
+                      key={toolCall.id}
+                      defaultOpen={false}
+                      className="rounded-md border border-border bg-background"
+                    >
+                      <CollapsibleTrigger asChild>
+                        <button
+                          type="button"
+                          className="group flex w-full items-center justify-between px-3 py-2 text-left"
+                        >
+                          <div className="space-y-1">
+                            <p className="text-sm font-medium">
+                              {toolCall.name || 'Unknown Tool'}
+                            </p>
+                            <p className="text-xs text-muted-foreground">
+                              {toolCall.id}
+                            </p>
+                          </div>
+                          <ChevronDown className="size-4 transition-transform group-data-[state=open]:rotate-180" />
+                        </button>
+                      </CollapsibleTrigger>
+                      <CollapsibleContent className="space-y-2 px-3 pb-3">
+                        <p className="text-xs text-muted-foreground">
+                          Requested:{' '}
+                          {toolCall.requestedAt
+                            ? formatTime(toolCall.requestedAt)
+                            : 'Unknown'}
+                        </p>
+                        <pre className="max-h-56 overflow-auto rounded bg-muted p-2 text-xs">
+                          {toolCall.argumentsText || 'No arguments provided.'}
+                        </pre>
+                      </CollapsibleContent>
+                    </Collapsible>
+                  ))
+                )}
+              </CollapsibleContent>
+            </Collapsible>
 
             <Collapsible className="rounded-md border border-border bg-muted">
               <CollapsibleTrigger asChild>
@@ -200,7 +357,7 @@ export default function TimelinePanel({ events, request }: TimelinePanelProps) {
 
       <Card>
         <CardHeader>
-          <CardTitle>Session Timeline ({events.length} events)</CardTitle>
+          <CardTitle>Request Timeline ({events.length} events)</CardTitle>
         </CardHeader>
         <CardContent className="space-y-3">
           {events.map((event, index) => {

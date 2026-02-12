@@ -44,7 +44,9 @@ export async function GET(request: NextRequest) {
       const queryLower = params.q.toLowerCase()
       sessions = sessions.filter((session) => {
         const chatId = session.chatId || ''
+        const sessionName = session.sessionName || ''
         return `${chatId} ${session.sessionId}`
+          .concat(` ${sessionName}`)
           .toLowerCase()
           .includes(queryLower)
       })

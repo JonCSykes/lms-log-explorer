@@ -1,9 +1,14 @@
+import * as crypto from 'node:crypto'
 import * as fs from 'node:fs'
 import * as path from 'node:path'
 
-import Database from 'better-sqlite3'
+import BetterSqlite3 from 'better-sqlite3'
 
-import { type Session } from '../../types/types'
+import { type ClientType, type Session } from '../../types/types'
+import {
+  type AiSessionRenamerSettings,
+  normalizeAiSettings,
+} from '../ai/settings'
 
 interface SessionRow {
   session_id: string
@@ -24,6 +29,16 @@ interface IndexedFileRow {
   mtime_ms: number
   size_bytes: number
   last_indexed_at: string
+}
+
+interface SessionGroupNameRow {
+  session_group_id: string
+  session_name: string
+}
+
+interface MetadataRow {
+  key: string
+  value: string
 }
 
 export interface StoredSessionRecord {
@@ -49,11 +64,12 @@ interface ReplaceFileSessionsInput {
 }
 
 interface DbGlobal {
-  db?: Database.Database
+  db?: BetterSqlite3.Database
   dbPath?: string
 }
 
 const DATABASE_SCHEMA_VERSION = 1
+const AI_SETTINGS_METADATA_KEY = 'ai_settings'
 const globalDb = globalThis as unknown as DbGlobal
 
 function expandHomePath(filePath: string): string {
@@ -74,7 +90,7 @@ function getDatabasePath(): string {
   return path.join(home, '.lms-log-explorer', 'index.sqlite')
 }
 
-function ensureSchema(db: Database.Database): void {
+function ensureSchema(db: BetterSqlite3.Database): void {
   db.pragma('journal_mode = WAL')
   db.pragma('synchronous = NORMAL')
 
@@ -106,6 +122,12 @@ function ensureSchema(db: Database.Database): void {
       updated_at TEXT NOT NULL
     );
 
+    CREATE TABLE IF NOT EXISTS session_group_names (
+      session_group_id TEXT PRIMARY KEY,
+      session_name TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+
     CREATE INDEX IF NOT EXISTS idx_sessions_chat_id ON sessions(chat_id);
     CREATE INDEX IF NOT EXISTS idx_sessions_first_seen_at ON sessions(first_seen_at DESC);
     CREATE INDEX IF NOT EXISTS idx_sessions_source_path ON sessions(source_path);
@@ -120,14 +142,14 @@ function ensureSchema(db: Database.Database): void {
   ).run(String(DATABASE_SCHEMA_VERSION))
 }
 
-function getDatabase(): Database.Database {
+function getDatabase(): BetterSqlite3.Database {
   const dbPath = getDatabasePath()
   if (globalDb.db && globalDb.dbPath === dbPath) {
     return globalDb.db
   }
 
   fs.mkdirSync(path.dirname(dbPath), { recursive: true })
-  const db = new Database(dbPath)
+  const db = new BetterSqlite3(dbPath)
   ensureSchema(db)
 
   globalDb.db = db
@@ -144,6 +166,131 @@ function parseJson<T>(value: string | null, fallback: T): T {
     return JSON.parse(value) as T
   } catch {
     return fallback
+  }
+}
+
+function buildSessionGroupId(sessionGroupKey: string): string {
+  const hash = crypto
+    .createHash('sha1')
+    .update(sessionGroupKey)
+    .digest('hex')
+    .slice(0, 12)
+  return `session-group-${hash}`
+}
+
+function buildSessionGroupKey(
+  sessionId: string,
+  systemMessageChecksum?: string,
+  userMessageChecksum?: string
+): string {
+  if (systemMessageChecksum && userMessageChecksum) {
+    return `${systemMessageChecksum}:${userMessageChecksum}`
+  }
+
+  return `request:${sessionId}`
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null
+}
+
+function stableSerialize(value: unknown): string {
+  if (value === null || typeof value !== 'object') {
+    return JSON.stringify(value)
+  }
+
+  if (Array.isArray(value)) {
+    return `[${value.map((item) => stableSerialize(item)).join(',')}]`
+  }
+
+  const entries = Object.entries(value as Record<string, unknown>).sort(
+    ([left], [right]) => left.localeCompare(right)
+  )
+
+  return `{${entries
+    .map(([key, nestedValue]) => `${JSON.stringify(key)}:${stableSerialize(nestedValue)}`)
+    .join(',')}}`
+}
+
+function checksumForMessage(message: unknown): string | undefined {
+  if (!isRecord(message)) {
+    return undefined
+  }
+
+  return crypto
+    .createHash('sha1')
+    .update(stableSerialize(message))
+    .digest('hex')
+}
+
+function extractTextFragments(value: unknown): string[] {
+  if (typeof value === 'string') {
+    return [value]
+  }
+
+  if (Array.isArray(value)) {
+    return value.flatMap((item) => extractTextFragments(item))
+  }
+
+  if (!isRecord(value)) {
+    return []
+  }
+
+  const fragments: string[] = []
+  for (const [key, nestedValue] of Object.entries(value)) {
+    if (
+      (key === 'content' || key === 'text') &&
+      typeof nestedValue === 'string' &&
+      nestedValue.length > 0
+    ) {
+      fragments.push(nestedValue)
+      continue
+    }
+
+    fragments.push(...extractTextFragments(nestedValue))
+  }
+
+  return fragments
+}
+
+function extractSessionIdentityFromRequest(request: Session['request']): {
+  systemMessageChecksum?: string
+  userMessageChecksum?: string
+  client: ClientType
+} {
+  const messages = request?.body.messages
+  if (!Array.isArray(messages)) {
+    return { client: 'Unknown' }
+  }
+
+  const firstMessage = messages[0]
+  const secondMessage = messages[1]
+  const systemMessageChecksum =
+    isRecord(firstMessage) && firstMessage.role === 'system'
+      ? checksumForMessage(firstMessage)
+      : undefined
+  const userMessageChecksum =
+    isRecord(secondMessage) && secondMessage.role === 'user'
+      ? checksumForMessage(secondMessage)
+      : undefined
+
+  const systemContent =
+    isRecord(firstMessage) && firstMessage.role === 'system'
+      ? extractTextFragments(firstMessage.content).join('\n')
+      : ''
+
+  return {
+    systemMessageChecksum,
+    userMessageChecksum,
+    client: systemContent.includes('You are opencode, an interactive CLI tool')
+      ? 'Opencode'
+      : systemContent.includes('You are Codex')
+        ? 'Codex'
+        : systemContent.includes(
+              'The assistant is Claude, created by Anthropic.'
+            )
+          ? 'Claude'
+          : 'Unknown',
   }
 }
 
@@ -198,6 +345,19 @@ export function loadStoredSessions(): StoredSessionRecord[] {
       row.request_json,
       null
     )
+    const parsedEvents = parseJson<Session['events']>(row.events_json, [])
+    const parsedToolCalls = parseJson<Session['toolCalls']>(
+      row.tool_calls_json,
+      []
+    )
+    const parsedMetrics = parseJson<Session['metrics']>(row.metrics_json, {})
+    const identity = extractSessionIdentityFromRequest(requestValue ?? undefined)
+    const sessionGroupKey = buildSessionGroupKey(
+      row.session_id,
+      identity.systemMessageChecksum,
+      identity.userMessageChecksum
+    )
+    const sessionGroupId = buildSessionGroupId(sessionGroupKey)
 
     return {
       sourcePath: row.source_path,
@@ -206,11 +366,16 @@ export function loadStoredSessions(): StoredSessionRecord[] {
         sessionId: row.session_id,
         chatId: row.chat_id || undefined,
         firstSeenAt: row.first_seen_at,
+        sessionGroupKey,
+        sessionGroupId,
+        client: identity.client,
+        systemMessageChecksum: identity.systemMessageChecksum,
+        userMessageChecksum: identity.userMessageChecksum,
         model: row.model || undefined,
         request: requestValue ?? undefined,
-        events: parseJson(row.events_json, []),
-        toolCalls: parseJson(row.tool_calls_json, []),
-        metrics: parseJson(row.metrics_json, {}),
+        events: parsedEvents,
+        toolCalls: parsedToolCalls,
+        metrics: parsedMetrics,
       },
     }
   })
@@ -357,4 +522,92 @@ export function deleteMissingFiles(existingPaths: Set<string>): string[] {
 
   transaction(removedPaths)
   return removedPaths
+}
+
+export function loadAiSettings(): AiSessionRenamerSettings {
+  const db = getDatabase()
+  const row = db
+    .prepare<[string], MetadataRow>('SELECT key, value FROM metadata WHERE key = ?')
+    .get(AI_SETTINGS_METADATA_KEY)
+
+  if (!row?.value) {
+    return normalizeAiSettings(undefined)
+  }
+
+  try {
+    return normalizeAiSettings(JSON.parse(row.value))
+  } catch {
+    return normalizeAiSettings(undefined)
+  }
+}
+
+export function saveAiSettings(settings: AiSessionRenamerSettings): void {
+  const db = getDatabase()
+  const normalizedSettings = normalizeAiSettings(settings)
+  db.prepare(
+    `
+      INSERT INTO metadata (key, value)
+      VALUES (?, ?)
+      ON CONFLICT(key) DO UPDATE SET value = excluded.value
+    `
+  ).run(AI_SETTINGS_METADATA_KEY, JSON.stringify(normalizedSettings))
+}
+
+export function listSessionGroupNames(): Map<string, string> {
+  const db = getDatabase()
+  const rows = db
+    .prepare<[], SessionGroupNameRow>(
+      `
+        SELECT session_group_id, session_name
+        FROM session_group_names
+      `
+    )
+    .all()
+
+  const map = new Map<string, string>()
+  for (const row of rows) {
+    map.set(row.session_group_id, row.session_name)
+  }
+
+  return map
+}
+
+export function getSessionGroupName(sessionGroupId: string): string | undefined {
+  const db = getDatabase()
+  const row = db
+    .prepare<[string], SessionGroupNameRow>(
+      `
+        SELECT session_group_id, session_name
+        FROM session_group_names
+        WHERE session_group_id = ?
+      `
+    )
+    .get(sessionGroupId)
+
+  return row?.session_name
+}
+
+export function upsertSessionGroupName(
+  sessionGroupId: string,
+  sessionName: string
+): void {
+  const trimmedName = sessionName.trim()
+  if (!trimmedName) {
+    return
+  }
+
+  const db = getDatabase()
+  db.prepare(
+    `
+      INSERT INTO session_group_names (
+        session_group_id,
+        session_name,
+        updated_at
+      )
+      VALUES (?, ?, ?)
+      ON CONFLICT(session_group_id) DO UPDATE SET
+        session_name = excluded.session_name,
+        updated_at = excluded.updated_at
+    `
+  ).run(sessionGroupId, trimmedName, new Date().toISOString())
 }
