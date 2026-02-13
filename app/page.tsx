@@ -117,7 +117,10 @@ interface TrendChartTooltipProps {
   }>
 }
 
-function formatTrendTooltipValue(value: number | undefined, isTps: boolean): string {
+function formatTrendTooltipValue(
+  value: number | undefined,
+  isTps: boolean
+): string {
   if (typeof value !== 'number' || !Number.isFinite(value)) {
     return 'Unknown'
   }
@@ -180,7 +183,10 @@ function parseTimestampMs(value?: string): number | undefined {
   return parsed
 }
 
-function pickEarlierTimestamp(left?: string, right?: string): string | undefined {
+function pickEarlierTimestamp(
+  left?: string,
+  right?: string
+): string | undefined {
   if (!left) return right
   if (!right) return left
 
@@ -258,9 +264,9 @@ export default function Home() {
   const [selectedSessionGroupId, setSelectedSessionGroupId] = useState<
     string | undefined
   >(undefined)
-  const [selectedRequestId, setSelectedRequestId] = useState<string | undefined>(
-    undefined
-  )
+  const [selectedRequestId, setSelectedRequestId] = useState<
+    string | undefined
+  >(undefined)
 
   const sessionGroups = useMemo<SessionGroupView[]>(() => {
     const groups = new Map<string, SessionGroupView>()
@@ -278,7 +284,8 @@ export default function Home() {
           sessionTotalInputTokens: session.sessionTotalInputTokens,
           sessionTotalOutputTokens: session.sessionTotalOutputTokens,
           sessionAverageTokensPerSecond: session.sessionAverageTokensPerSecond,
-          sessionTotalPromptProcessingMs: session.sessionTotalPromptProcessingMs,
+          sessionTotalPromptProcessingMs:
+            session.sessionTotalPromptProcessingMs,
           earliestRequestStartedAt:
             session.requestStartedAt || session.firstSeenAt,
           latestRequestEndedAt:
@@ -307,7 +314,10 @@ export default function Home() {
         existing.sessionName = session.sessionName
       }
 
-      if (existing.sessionClient === 'Unknown' && session.sessionClient !== 'Unknown') {
+      if (
+        existing.sessionClient === 'Unknown' &&
+        session.sessionClient !== 'Unknown'
+      ) {
         existing.sessionClient = session.sessionClient
       }
 
@@ -334,7 +344,9 @@ export default function Home() {
       )
       existing.latestRequestEndedAt = pickLaterTimestamp(
         existing.latestRequestEndedAt,
-        session.requestEndedAt || session.requestStartedAt || session.firstSeenAt
+        session.requestEndedAt ||
+          session.requestStartedAt ||
+          session.firstSeenAt
       )
 
       if (
@@ -348,14 +360,20 @@ export default function Home() {
 
     return [...groups.values()]
       .map((group) => {
-        const requestCount = Math.max(group.sessionRequestCount, group.requests.length)
+        const requestCount = Math.max(
+          group.sessionRequestCount,
+          group.requests.length
+        )
         const averagePromptProcessingMsPerRequest =
-          typeof group.sessionTotalPromptProcessingMs === 'number' && requestCount > 0
+          typeof group.sessionTotalPromptProcessingMs === 'number' &&
+          requestCount > 0
             ? group.sessionTotalPromptProcessingMs / requestCount
             : undefined
         const earliestRequestStartedAt = group.earliestRequestStartedAt
         const latestRequestEndedAt = group.latestRequestEndedAt
-        const earliestRequestStartedAtMs = parseTimestampMs(earliestRequestStartedAt)
+        const earliestRequestStartedAtMs = parseTimestampMs(
+          earliestRequestStartedAt
+        )
         const latestRequestEndedAtMs = parseTimestampMs(latestRequestEndedAt)
         const sessionTotalElapsedMs =
           earliestRequestStartedAtMs !== undefined &&
@@ -363,8 +381,12 @@ export default function Home() {
             ? Math.max(0, latestRequestEndedAtMs - earliestRequestStartedAtMs)
             : undefined
         const sortedRequests = [...group.requests].sort((left, right) => {
-          const leftMs = parseTimestampMs(left.requestStartedAt || left.firstSeenAt)
-          const rightMs = parseTimestampMs(right.requestStartedAt || right.firstSeenAt)
+          const leftMs = parseTimestampMs(
+            left.requestStartedAt || left.firstSeenAt
+          )
+          const rightMs = parseTimestampMs(
+            right.requestStartedAt || right.firstSeenAt
+          )
           if (leftMs === undefined && rightMs === undefined) {
             return left.sessionId.localeCompare(right.sessionId)
           }
@@ -437,7 +459,9 @@ export default function Home() {
 
     if (
       !selectedSessionGroupId ||
-      !sessionGroups.some((group) => group.sessionGroupId === selectedSessionGroupId)
+      !sessionGroups.some(
+        (group) => group.sessionGroupId === selectedSessionGroupId
+      )
     ) {
       setSelectedSessionGroupId(sessionGroups[0]?.sessionGroupId)
     }
@@ -543,7 +567,9 @@ export default function Home() {
     return activeSessionGroup.requests
       .map((request) => {
         const pointTimestamp =
-          request.requestEndedAt || request.requestStartedAt || request.firstSeenAt
+          request.requestEndedAt ||
+          request.requestStartedAt ||
+          request.firstSeenAt
         const timestampMs = parseTimestampMs(pointTimestamp)
         const requestTps =
           typeof request.requestTokensPerSecond === 'number' &&
@@ -642,8 +668,13 @@ export default function Home() {
                   size="sm"
                   className="gap-2"
                   onClick={() => void refresh()}
+                  data-testid="page-refresh-button"
                 >
-                  {sessionsLoading ? 'Loading...' : <RefreshCw className="size-4" />}
+                  {sessionsLoading ? (
+                    'Loading...'
+                  ) : (
+                    <RefreshCw className="size-4" />
+                  )}
                   Refresh
                 </Button>
                 <ThemeToggle />
@@ -653,14 +684,16 @@ export default function Home() {
 
           <main className="flex-1 space-y-4 p-4">
             {sessionsLoading && sessions.length === 0 ? (
-              <div className="text-center text-muted-foreground">Loading...</div>
+              <div className="text-center text-muted-foreground">
+                Loading...
+              </div>
             ) : !activeSessionGroup ? (
               <div className="text-center text-muted-foreground">
                 Select a session from the sidebar to view details.
               </div>
             ) : (
               <>
-                <Card>
+                <Card data-testid="session-overview-card">
                   <Collapsible defaultOpen>
                     <CardHeader className="pb-2">
                       <div className="flex items-center justify-between gap-3">
@@ -700,7 +733,9 @@ export default function Home() {
                                         className="size-5 shrink-0 text-muted-foreground"
                                       />
                                     )}
-                                    <span>{activeSessionGroup.sessionClient}</span>
+                                    <span>
+                                      {activeSessionGroup.sessionClient}
+                                    </span>
                                   </div>
                                 </TableCell>
                               </TableRow>
@@ -713,19 +748,25 @@ export default function Home() {
                               <TableRow>
                                 <TableHead>Total Requests</TableHead>
                                 <TableCell>
-                                  {formatNumber(activeSessionGroup.sessionRequestCount)}
+                                  {formatNumber(
+                                    activeSessionGroup.sessionRequestCount
+                                  )}
                                 </TableCell>
                               </TableRow>
                               <TableRow>
                                 <TableHead>Total Input Tokens</TableHead>
                                 <TableCell>
-                                  {formatNumber(activeSessionGroup.sessionTotalInputTokens)}
+                                  {formatNumber(
+                                    activeSessionGroup.sessionTotalInputTokens
+                                  )}
                                 </TableCell>
                               </TableRow>
                               <TableRow>
                                 <TableHead>Total Output Tokens</TableHead>
                                 <TableCell>
-                                  {formatNumber(activeSessionGroup.sessionTotalOutputTokens)}
+                                  {formatNumber(
+                                    activeSessionGroup.sessionTotalOutputTokens
+                                  )}
                                 </TableCell>
                               </TableRow>
                               <TableRow>
@@ -770,13 +811,17 @@ export default function Home() {
                               <TableRow>
                                 <TableHead>Total Idle Time</TableHead>
                                 <TableCell>
-                                  {formatDurationMs(activeSessionGroup.sessionTotalIdleMs)}
+                                  {formatDurationMs(
+                                    activeSessionGroup.sessionTotalIdleMs
+                                  )}
                                 </TableCell>
                               </TableRow>
                               <TableRow>
                                 <TableHead>Total Elapsed Time</TableHead>
                                 <TableCell>
-                                  {formatDurationMs(activeSessionGroup.sessionTotalElapsedMs)}
+                                  {formatDurationMs(
+                                    activeSessionGroup.sessionTotalElapsedMs
+                                  )}
                                 </TableCell>
                               </TableRow>
                             </TableBody>
@@ -787,7 +832,7 @@ export default function Home() {
                   </Collapsible>
                 </Card>
 
-                <Card>
+                <Card data-testid="stats-card">
                   <Collapsible defaultOpen>
                     <CardHeader className="pb-2">
                       <div className="flex items-center justify-between gap-3">
@@ -809,7 +854,8 @@ export default function Home() {
                         <div className="rounded-md border border-border bg-muted/20 p-3">
                           {tpsTrendPoints.length === 0 ? (
                             <p className="text-sm text-muted-foreground">
-                              Not enough request data to chart tokens per second.
+                              Not enough request data to chart tokens per
+                              second.
                             </p>
                           ) : (
                             <div className="space-y-2">
@@ -817,7 +863,8 @@ export default function Home() {
                                 Request Tokens Over Time
                               </p>
                               <p className="text-xs text-muted-foreground">
-                                Highlight a range in the selector below to zoom in.
+                                Highlight a range in the selector below to zoom
+                                in.
                               </p>
                               <div className="h-[18rem] w-full">
                                 <ResponsiveContainer width="100%" height="100%">
@@ -841,7 +888,9 @@ export default function Home() {
                                     <YAxis
                                       yAxisId="left"
                                       dataKey="tps"
-                                      tickFormatter={(value) => Number(value).toFixed(1)}
+                                      tickFormatter={(value) =>
+                                        Number(value).toFixed(1)
+                                      }
                                       tickLine={false}
                                       axisLine={false}
                                       width={56}
@@ -900,7 +949,7 @@ export default function Home() {
                   </Collapsible>
                 </Card>
 
-                <Card>
+                <Card data-testid="prompt-audit-card">
                   <Collapsible defaultOpen={false}>
                     <CardHeader className="pb-2">
                       <div className="flex items-center justify-between gap-3">
@@ -924,11 +973,15 @@ export default function Home() {
                             Loading prompt audit...
                           </p>
                         ) : promptAuditError ? (
-                          <p className="text-sm text-destructive">{promptAuditError}</p>
+                          <p className="text-sm text-destructive">
+                            {promptAuditError}
+                          </p>
                         ) : (
                           <Tabs defaultValue="messages" className="space-y-3">
                             <TabsList>
-                              <TabsTrigger value="messages">Messages</TabsTrigger>
+                              <TabsTrigger value="messages">
+                                Messages
+                              </TabsTrigger>
                               <TabsTrigger value="system">System</TabsTrigger>
                             </TabsList>
 
@@ -947,7 +1000,10 @@ export default function Home() {
                                       key={message.id}
                                       className="space-y-2 rounded-md border border-border bg-muted/30 p-3"
                                     >
-                                      <Badge variant="outline" className="capitalize">
+                                      <Badge
+                                        variant="outline"
+                                        className="capitalize"
+                                      >
                                         {message.role}
                                       </Badge>
                                       <div className="text-sm whitespace-pre-wrap break-words">
@@ -1008,7 +1064,7 @@ export default function Home() {
                   </Collapsible>
                 </Card>
 
-                <Card>
+                <Card data-testid="requests-card">
                   <Collapsible defaultOpen={false}>
                     <CardHeader className="pb-2">
                       <div className="flex items-center justify-between gap-3">
@@ -1034,34 +1090,47 @@ export default function Home() {
                             <TableRow>
                               <TableHead>Request</TableHead>
                               <TableHead>Timestamp</TableHead>
-                              <TableHead className="text-right">Tool Calls</TableHead>
+                              <TableHead className="text-right">
+                                Tool Calls
+                              </TableHead>
                               <TableHead className="text-right">
                                 Total Elapsed Time
                               </TableHead>
                               <TableHead className="text-right">
                                 Total Prompt Processing
                               </TableHead>
-                              <TableHead className="text-right">Input Tokens</TableHead>
-                              <TableHead className="text-right">Output Tokens</TableHead>
+                              <TableHead className="text-right">
+                                Input Tokens
+                              </TableHead>
+                              <TableHead className="text-right">
+                                Output Tokens
+                              </TableHead>
                             </TableRow>
                           </TableHeader>
                           <TableBody>
                             {activeSessionGroup.requests.map((request) => {
-                              const isSelected = selectedRequestId === request.sessionId
+                              const isSelected =
+                                selectedRequestId === request.sessionId
 
                               return (
                                 <TableRow
                                   key={request.sessionId}
-                                  onClick={() => setSelectedRequestId(request.sessionId)}
+                                  onClick={() =>
+                                    setSelectedRequestId(request.sessionId)
+                                  }
                                   className="cursor-pointer"
-                                  data-state={isSelected ? 'selected' : undefined}
+                                  data-state={
+                                    isSelected ? 'selected' : undefined
+                                  }
+                                  data-testid="request-row"
                                 >
                                   <TableCell className="font-medium">
                                     {request.sessionId}
                                   </TableCell>
                                   <TableCell className="text-muted-foreground">
                                     {formatTimestamp(
-                                      request.requestStartedAt || request.firstSeenAt
+                                      request.requestStartedAt ||
+                                        request.firstSeenAt
                                     )}
                                   </TableCell>
                                   <TableCell className="text-right font-mono text-xs">
@@ -1071,7 +1140,9 @@ export default function Home() {
                                     {formatDurationMs(request.requestElapsedMs)}
                                   </TableCell>
                                   <TableCell className="text-right font-mono text-xs">
-                                    {formatDurationMs(request.requestPromptProcessingMs)}
+                                    {formatDurationMs(
+                                      request.requestPromptProcessingMs
+                                    )}
                                   </TableCell>
                                   <TableCell className="text-right font-mono text-xs">
                                     {formatNumber(request.promptTokens)}
@@ -1107,11 +1178,14 @@ export default function Home() {
         className={`fixed inset-y-0 right-0 z-50 w-full max-w-2xl overflow-y-auto border-l border-border bg-background shadow-xl transition-transform duration-200 ${
           selectedRequestId ? 'translate-x-0' : 'translate-x-full'
         }`}
+        data-testid="request-drawer"
       >
         <div className="sticky top-0 z-10 flex items-center justify-between border-b border-border bg-background/95 px-4 py-3 backdrop-blur">
           <div className="min-w-0">
             <p className="text-xs text-muted-foreground">Request</p>
-            <p className="truncate text-sm font-semibold">{selectedRequestId || 'None'}</p>
+            <p className="truncate text-sm font-semibold">
+              {selectedRequestId || 'None'}
+            </p>
           </div>
           <Button
             type="button"
@@ -1130,7 +1204,9 @@ export default function Home() {
               Select a request to view request data and timeline.
             </div>
           ) : requestLoading ? (
-            <div className="text-sm text-muted-foreground">Loading request...</div>
+            <div className="text-sm text-muted-foreground">
+              Loading request...
+            </div>
           ) : requestError ? (
             <div className="text-sm text-destructive">{requestError}</div>
           ) : requestData ? (
@@ -1141,13 +1217,18 @@ export default function Home() {
               toolCalls={requestData.toolCalls}
             />
           ) : (
-            <div className="text-sm text-muted-foreground">Request not found.</div>
+            <div className="text-sm text-muted-foreground">
+              Request not found.
+            </div>
           )}
         </div>
       </aside>
 
       {isIndexing ? (
-        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50 px-4">
+        <div
+          className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50 px-4"
+          data-testid="indexing-overlay"
+        >
           <div className="w-full max-w-lg rounded-lg border border-border bg-background p-6 shadow-lg">
             <h2 className="text-lg font-semibold">Indexing Log Files</h2>
             <p className="mt-2 text-sm text-muted-foreground">
@@ -1161,8 +1242,8 @@ export default function Home() {
               />
             </div>
             <div className="mt-2 text-xs text-muted-foreground">
-              {indexingProgress}% complete ({processedFilesLabel}/{totalFilesLabel}{' '}
-              files)
+              {indexingProgress}% complete ({processedFilesLabel}/
+              {totalFilesLabel} files)
             </div>
             {indexingDetails.currentFile ? (
               <div className="mt-2 truncate text-xs text-muted-foreground">

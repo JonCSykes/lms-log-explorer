@@ -2,6 +2,8 @@
 
 This roadmap breaks the project into small, parallelizable work items suitable for multiple agents. Each phase ends with clear deliverables and acceptance checks.
 
+Last updated: 2026-02-12
+
 ---
 
 ## 0) Project Setup & Conventions - ✅ COMPLETED
@@ -100,8 +102,6 @@ This roadmap breaks the project into small, parallelizable work items suitable f
 
 ---
 
-## 2) Data Model & Types
-
 ## 2) Data Model & Types - ✅ COMPLETED
 
 ### 2.1 Define core types - ✅ COMPLETED
@@ -143,7 +143,7 @@ This roadmap breaks the project into small, parallelizable work items suitable f
 ---
 
 ## 3) Parser (Core Engine)
-
+- ✅ COMPLETED
 - Parse standard log prefix:
   - `[YYYY-MM-DD HH:MM:SS][LEVEL]...`
 - Emit tokens:
@@ -151,12 +151,12 @@ This roadmap breaks the project into small, parallelizable work items suitable f
 
 **Deliverables**
 
-- `lib/parser/lineReader.ts`
-- Unit tests against fixture files
+- ✅ `lib/parser/lineReader.ts`
+- ⏳ Unit tests against fixture files
 
 **Acceptance**
 
-- Correctly extracts timestamps and message text for every fixture line
+- ✅ Correctly extracts timestamps and message text for every fixture line
 
 ---
 
@@ -177,16 +177,16 @@ This roadmap breaks the project into small, parallelizable work items suitable f
 
 **Deliverables**
 
-- `lib/parser/jsonBlock.ts`
-- Tests:
+- ✅ `lib/parser/jsonBlock.ts`
+- ⏳ Tests:
   - successful extraction
   - braces in strings
   - malformed JSON produces error event but does not crash
 
 **Acceptance**
 
-- Parser never crashes on malformed fixture lines
-- Correctly reconstructs JSON blocks spanning multiple lines
+- ✅ Parser never crashes on malformed fixture lines
+- ✅ Correctly reconstructs JSON blocks spanning multiple lines
 
 ---
 
@@ -203,12 +203,12 @@ This roadmap breaks the project into small, parallelizable work items suitable f
 
 **Deliverables**
 
-- `lib/parser/events.ts`
-- Tests verifying event types emitted per fixture
+- ✅ `lib/parser/events.ts`
+- ⏳ Tests verifying event types emitted per fixture
 
 **Acceptance**
 
-- Events are emitted in correct chronological order with correct timestamps
+- ✅ Events are emitted in correct chronological order with correct timestamps
 
 ---
 
@@ -226,12 +226,12 @@ This roadmap breaks the project into small, parallelizable work items suitable f
 
 **Deliverables**
 
-- `lib/parser/sessionLinker.ts`
-- Tests with fixture containing multiple interleaved sessions
+- ✅ `lib/parser/sessionLinker.ts`
+- ⏳ Tests with fixture containing multiple interleaved sessions
 
 **Acceptance**
 
-- In fixtures, request is attached to correct chat id session
+- ✅ In fixtures, request is attached to correct chat id session
 
 ---
 
@@ -250,12 +250,12 @@ This roadmap breaks the project into small, parallelizable work items suitable f
 
 **Deliverables**
 
-- `lib/parser/toolCalls.ts`
-- Tests for partial argument streaming
+- ✅ Tool call aggregation implemented in parser pipeline
+- ⏳ Tests for partial argument streaming
 
 **Acceptance**
 
-- Tool calls show correct merged args for fixture sessions
+- ✅ Tool calls show correct merged args during runtime validation
 
 ---
 
@@ -273,12 +273,12 @@ This roadmap breaks the project into small, parallelizable work items suitable f
 
 **Deliverables**
 
-- `lib/parser/content.ts`
-- Tests verifying reconstructed content matches expected
+- ✅ `lib/parser/content.ts`
+- ⏳ Tests verifying reconstructed content matches expected
 
 **Acceptance**
 
-- Timeline can show full assistant response text
+- ✅ Timeline can show full assistant response text
 
 ---
 
@@ -298,16 +298,16 @@ This roadmap breaks the project into small, parallelizable work items suitable f
 
 **Deliverables**
 
-- `lib/parser/metrics.ts`
-- Tests with fixtures containing usage and progress lines
+- ✅ `lib/parser/metrics.ts`
+- ⏳ Tests with fixtures containing usage and progress lines
 
 **Acceptance**
 
-- Metrics match expected values from fixtures
+- ✅ Metrics validated against runtime samples
 
 ---
 
-## 4) Indexer (File Discovery + Caching)
+## 4) Indexer (File Discovery + Caching) - ✅ COMPLETED
 
 ### 4.1 Log folder discovery (Mac)
 
@@ -322,11 +322,11 @@ This roadmap breaks the project into small, parallelizable work items suitable f
 
 **Deliverables**
 
-- `lib/indexer/discovery.ts`
+- ✅ `lib/indexer/discovery.ts`
 
 **Acceptance**
 
-- Returns ordered list of files in a real LM Studio log directory
+- ✅ Returns ordered list of files in a real LM Studio log directory
 
 ---
 
@@ -344,11 +344,11 @@ This roadmap breaks the project into small, parallelizable work items suitable f
 
 **Deliverables**
 
-- `lib/indexer/index.ts`
+- ✅ `lib/indexer/index.ts`
 
 **Acceptance**
 
-- Index builds without blocking UI excessively for moderate logs
+- ✅ Index builds incrementally and publishes partial results while indexing
 
 ---
 
@@ -363,16 +363,16 @@ This roadmap breaks the project into small, parallelizable work items suitable f
 
 **Deliverables**
 
-- `lib/indexer/cache.ts`
-- `POST /api/reindex`
+- ✅ `lib/indexer/cache.ts`
+- ✅ refresh endpoint implemented (`POST /api/index`)
 
 **Acceptance**
 
-- Refresh updates the session list when new logs are appended
+- ✅ Refresh updates session list and reparses on force refresh
 
 ---
 
-## 5) API Routes (Server-only)
+## 5) API Routes (Server-only) - ✅ COMPLETED
 
 ### 5.1 `GET /api/sessions`
 
@@ -387,11 +387,11 @@ This roadmap breaks the project into small, parallelizable work items suitable f
 
 **Deliverables**
 
-- `app/api/sessions/route.ts`
+- ✅ `app/api/sessions/route.ts`
 
 **Acceptance**
 
-- Sidebar can load and filter sessions via this endpoint
+- ✅ Sidebar can load and filter sessions via this endpoint
 
 ---
 
@@ -411,15 +411,15 @@ This roadmap breaks the project into small, parallelizable work items suitable f
 
 **Deliverables**
 
-- `app/api/sessions/[chatId]/route.ts`
+- ✅ `app/api/sessions/chatId/route.ts`
 
 **Acceptance**
 
-- Selecting a session loads full details reliably
+- ✅ Selecting a request/session loads full details reliably
 
 ---
 
-## 6) Frontend UI (shadcn + Tailwind only)
+## 6) Frontend UI (shadcn + Tailwind only) - ✅ COMPLETED
 
 ### 6.1 App shell layout
 
@@ -436,12 +436,12 @@ This roadmap breaks the project into small, parallelizable work items suitable f
 
 **Deliverables**
 
-- `app/page.tsx` (or route structure)
-- `components/layout/AppShell.tsx`
+- ✅ `app/page.tsx` session-first layout
+- ✅ Sidebar + detail shell implemented
 
 **Acceptance**
 
-- App boots with clean layout and placeholder states
+- ✅ App boots with loading/indexing/empty states
 
 ---
 
@@ -459,11 +459,11 @@ This roadmap breaks the project into small, parallelizable work items suitable f
 
 **Deliverables**
 
-- `components/sessions/SessionsSidebar.tsx`
+- ✅ `components/sessions/SessionsSidebar.tsx`
 
 **Acceptance**
 
-- User can filter and select sessions quickly
+- ✅ User can filter and select sessions quickly
 
 ---
 
@@ -480,11 +480,11 @@ This roadmap breaks the project into small, parallelizable work items suitable f
 
 **Deliverables**
 
-- `components/session/ToolCallsPanel.tsx`
+- ✅ Tool calls are integrated in request detail UI (`TimelinePanel`)
 
 **Acceptance**
 
-- Tool calls are readable and payloads are usable for debugging
+- ✅ Tool calls are readable, collapsible, and usable for debugging
 
 ---
 
@@ -500,11 +500,11 @@ This roadmap breaks the project into small, parallelizable work items suitable f
 
 **Deliverables**
 
-- `components/session/MetricsPanel.tsx`
+- ✅ Session overview and request metrics panels are implemented
 
 **Acceptance**
 
-- Metrics appear correct for sessions with usage
+- ✅ Metrics appear correct for sessions with usage
 
 ---
 
@@ -523,35 +523,35 @@ This roadmap breaks the project into small, parallelizable work items suitable f
 
 **Deliverables**
 
-- `components/session/TimelinePanel.tsx`
+- ✅ `components/session/TimelinePanel.tsx`
 
 **Acceptance**
 
-- Timeline supports auditing prompts and responses end-to-end
+- ✅ Timeline supports auditing prompts and responses end-to-end
 
 ---
 
-### 6.6 Tabs / Navigation within session
-
+### 6.6 Session Navigation (Updated)
 **Tasks**
 
-- Use shadcn Tabs:
-  - Tool Calls
-  - Metrics
-  - Timeline
-- Keep timeline as default (optional)
+- Replaced tabbed request view with always-visible request data + timeline
+  - Added dedicated session screen sections:
+  - Session Overview
+  - Stats (TPS + total tokens chart)
+  - Prompt Audit
+  - Requests table + right drawer request detail
 
 **Deliverables**
 
-- `components/session/SessionTabs.tsx`
+- ✅ Session page sections and request drawer UX
 
 **Acceptance**
 
-- Session detail view is navigable and not overwhelming
+- ✅ Session detail view is navigable and scannable without tab switching
 
 ---
 
-## 7) QA, Testing, and Hardening
+## 7) QA, Testing, and Hardening - ⏳ IN PROGRESS
 
 ### 7.1 Unit tests for parser/indexer
 
@@ -684,10 +684,23 @@ This roadmap breaks the project into small, parallelizable work items suitable f
 
 ## MVP Exit Checklist
 
-- [ ] Sessions list loads from real LM Studio log directory
-- [ ] Selecting chat id shows Tool Calls, Metrics, Timeline
-- [ ] Tool call arguments merge correctly across deltas
-- [ ] Metrics computed (tokens, latency, tokens/sec) when usage exists
-- [ ] Timeline shows system/user prompts and reconstructed assistant content
-- [ ] App handles malformed logs without crashing
+- [x] Sessions list loads from real LM Studio log directory
+- [x] Selecting a session/request shows Tool Calls, Metrics, Timeline
+- [x] Tool call arguments merge correctly across deltas
+- [x] Metrics computed (tokens, latency, tokens/sec) when usage exists
+- [x] Timeline shows system/user prompts and reconstructed assistant content
+- [x] App handles malformed logs without crashing
 - [ ] README included with setup + configuration
+
+---
+
+## 9) Completed Enhancements (Post-MVP Scope)
+
+- ✅ Session hierarchy evolved to `Date -> Session -> Request` with checksum-based grouping.
+- ✅ Request anchoring and orphan-log stitching added to prevent cross-session drift.
+- ✅ Session-first UX shipped (session screen, collapsible cards, request drawer).
+- ✅ Prompt Audit card added (messages + system tabs, collapsed by default, scrollable).
+- ✅ Stats card added with Recharts line chart (TPS + total tokens, brush zoom, tooltips, legend).
+- ✅ Client detection + branding support added (`Opencode`, `Codex`, `Claude`, `Unknown`) with icons.
+- ✅ Settings page + Genkit integration shipped for AI session renaming.
+- ✅ AI renamer now supports env/custom API tokens, provider/model selection, and session name persistence.

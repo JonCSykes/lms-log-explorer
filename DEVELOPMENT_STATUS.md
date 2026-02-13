@@ -1,5 +1,124 @@
 # Development Status
 
+## 2026-02-13
+
+### MVP Documentation Wrap-Up
+
+- Rewrote `README.md` with full setup and operational docs:
+  - local development configuration and run flow,
+  - Docker Compose configuration and lifecycle,
+  - environment variable reference,
+  - feature overview, architecture/how-it-works, API route summary,
+  - troubleshooting and reset/debug workflows.
+- Added tracked `.env.example` template for Compose configuration bootstrap.
+
+### Docker OOM Fix: SQLite Hydration + Heap Config
+
+- Reduced startup memory spikes during persisted index hydration:
+  - added `forEachStoredSession` in `lib/indexer/sqliteStore.ts` to stream sessions using SQLite statement iteration instead of `SELECT ... .all()`,
+  - updated persisted index build in `lib/indexer/index.ts` to consume streamed records directly (no full-session array + sort copy).
+- Added `lib/indexer/__tests__/sqliteStore.test.ts` to validate iterator ordering and parity with array-loading API.
+- Added Docker compose heap tuning via environment:
+  - `docker-compose.yml` now sets `NODE_OPTIONS=--max-old-space-size=${NODE_MAX_OLD_SPACE_SIZE:-4096}`,
+  - `.env` now includes `NODE_MAX_OLD_SPACE_SIZE=4096` default.
+
+### Sidebar Date Grouping Fix (Feb 9 -> Feb 10)
+
+- Fixed sidebar day grouping bug where late-day log timestamps could be shifted to the next day due to UTC conversion via `toISOString()`.
+- Added `lib/logTimestamp.ts` utilities for log-aware timestamp handling:
+  - `extractDateKeyFromTimestamp` (calendar day key from raw log timestamp),
+  - `parseLogTimestampMs`,
+  - `compareLogTimestampsAsc`.
+- Updated `components/sessions/SessionsSidebar.tsx` to:
+  - derive day keys from raw log date strings (not UTC conversion),
+  - use log-aware timestamp comparison for sorting/earliest-session selection.
+- Added unit tests in `lib/logTimestamp.test.ts` covering date-key extraction and timestamp ordering.
+
+### Parser Session Boundary Hardening
+
+- Fixed parser behavior that could create sessions from non-request events (`prompt_processing`, `stream_packet`, `stream_finished`) before any `request_received`.
+- Session creation is now request-anchored: a session starts only when `request_received` is seen.
+- Added pending pre-request event replay:
+  - non-request events that appear before the first request are buffered,
+  - when the first request arrives, buffered events are attached only if their timestamp is `>=` the request timestamp,
+  - stale pre-request events are dropped.
+- Added regression tests in `lib/parser/__tests__/sessionBuilder.test.ts`:
+  - orphan non-request events produce zero sessions,
+  - same-timestamp pre-request events attach to the request session and do not form orphan sessions.
+
+### Local SQLite Reset Command
+
+- Added `pnpm db:reset` command to remove the local index database files for clean reload testing.
+- Added `pnpm db:reset:docker` command to tear down compose services and remove the SQLite volume for clean containerized reload testing.
+- New script `scripts/reset-index-db.mjs` resolves `LMS_INDEX_DB_PATH` from:
+  - runtime environment first,
+  - `.env` / `.env.local` fallback,
+  - default path `~/.lms-log-explorer/index.sqlite`.
+- Reset removes the primary DB file plus SQLite sidecar files (`-wal`, `-shm`) when present.
+
+### Containerization: Dockerfile + Docker Compose
+
+- Added production multi-stage container build in `Dockerfile`:
+  - Node 20 base with Corepack/PNPM.
+  - Dependency install stage (`pnpm install --frozen-lockfile`).
+  - Build stage (`pnpm build`) plus runtime dependency pruning (`pnpm prune --prod`).
+  - Minimal runtime stage with `.next`, `public`, production `node_modules`, and `next.config.mjs`.
+- Added `.dockerignore` to keep build context lean and avoid shipping local artifacts.
+- Added `docker-compose.yml` service for local container runs:
+  - publishes app on port `3000` (override via `LMS_LOG_EXPLORER_PORT`),
+  - mounts host log directory to `/logs` (override via `LMS_LOG_ROOT_HOST`),
+  - persists SQLite index at `/data/index.sqlite` using named volume.
+
+### Validation Summary (Containerization)
+
+- `docker compose config`: passes.
+- `pnpm lint`: passes.
+- `pnpm type-check`: passes.
+
+### Phase 7 QA Foundation: Automated Tests + Playwright E2E
+
+- Added Vitest-based parser/indexer test harness:
+  - `vitest.config.ts`
+  - `vitest.setup.ts` (isolated `LMS_LOG_ROOT` + `LMS_INDEX_DB_PATH`)
+  - Parser tests:
+    - `lib/parser/__tests__/jsonBlock.test.ts`
+    - `lib/parser/__tests__/toolCalls.test.ts`
+    - `lib/parser/__tests__/sessionBuilder.test.ts`
+  - Indexer integration tests:
+    - `lib/indexer/__tests__/indexer.test.ts`
+- Added Playwright E2E suite and config:
+  - `playwright.config.ts`
+  - `e2e/home-smoke.spec.ts`
+  - `e2e/indexing-refresh.spec.ts`
+  - `e2e/prompt-audit.spec.ts`
+  - `e2e/request-drawer.spec.ts`
+  - `e2e/search-filter.spec.ts`
+  - `e2e/helpers.ts`
+  - `scripts/setup-e2e-fixtures.mjs` for discovery-compatible fixture log names.
+- Added test scripts in `package.json`:
+  - `test`, `test:unit`, `test:watch`, `test:integration`
+  - `test:e2e`, `test:e2e:headed`, `test:e2e:install`
+- Added UI test hooks via `data-testid` on sidebar/session/drawer/timeline targets.
+
+### Phase 7 Hardening + Diagnostics
+
+- Added debug-gated index diagnostics logs in `lib/indexer/index.ts`:
+  - build start/finish timing
+  - per-file parse/skip timing
+  - gated behind `DEBUG=true`.
+- Added debug summary route:
+  - `GET /api/debug/index` (returns indexing status + sample sessions only when `DEBUG=true`; 404 otherwise).
+- Updated Next config for deterministic test isolation:
+  - `next.config.mjs` now supports env-driven `distDir` and absolute Turbopack root.
+
+### Validation Summary
+
+- `pnpm type-check`: passes.
+- `pnpm lint`: passes.
+- `pnpm test:unit`: passes (13 tests).
+- `pnpm test:e2e:install`: passes.
+- `pnpm test:e2e`: passes (5 Playwright specs).
+
 ## 2026-02-10
 
 ### SQLite Persistent Index + Incremental Refresh

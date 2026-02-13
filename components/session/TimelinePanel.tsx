@@ -133,7 +133,10 @@ export default function TimelinePanel({
     )
   }
 
-  const getEventDuration = (event: TimelineEvent, nextEvent?: TimelineEvent) => {
+  const getEventDuration = (
+    event: TimelineEvent,
+    nextEvent?: TimelineEvent
+  ) => {
     if (event.type === 'stream_chunk' && isStreamResponseData(event.data)) {
       return formatDurationMs(event.data.elapsedMs)
     }
@@ -196,7 +199,9 @@ export default function TimelinePanel({
     const startTs =
       request?.ts ||
       events.find((event) => event.type === 'request')?.ts ||
-      (Number.isFinite(earliestEventMs) ? new Date(earliestEventMs).toISOString() : undefined)
+      (Number.isFinite(earliestEventMs)
+        ? new Date(earliestEventMs).toISOString()
+        : undefined)
     const startMs = startTs ? new Date(startTs).getTime() : Number.NaN
     const endMs = Number.isFinite(latestEventMs) ? latestEventMs : Number.NaN
 
@@ -210,7 +215,7 @@ export default function TimelinePanel({
   return (
     <div className="space-y-4">
       {request ? (
-        <Card>
+        <Card data-testid="request-data-card">
           <CardHeader>
             <CardTitle>Request Data</CardTitle>
           </CardHeader>
@@ -286,6 +291,7 @@ export default function TimelinePanel({
                   variant="ghost"
                   size="sm"
                   className="group w-full justify-between"
+                  data-testid="tool-calls-toggle"
                 >
                   Tool Calls ({toolCalls.length})
                   <ChevronDown className="size-4 transition-transform group-data-[state=open]:rotate-180" />
@@ -355,7 +361,7 @@ export default function TimelinePanel({
         </Card>
       ) : null}
 
-      <Card>
+      <Card data-testid="request-timeline-card">
         <CardHeader>
           <CardTitle>Request Timeline ({events.length} events)</CardTitle>
         </CardHeader>
