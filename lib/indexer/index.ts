@@ -13,9 +13,9 @@ import { type SessionData, buildAsync } from '../parser/sessionBuilder'
 import { type LogFile, getAllLogFiles } from './discovery'
 import {
   deleteMissingFiles,
+  forEachStoredSession,
   listIndexedFiles,
   listSessionGroupNames,
-  loadStoredSessions,
   replaceFileSessions,
   upsertIndexedFile,
 } from './sqliteStore'
@@ -53,6 +53,26 @@ interface BuildIndexOptions {
 interface ParsedFileSession {
   session: Session
   sourceOrdinal: number
+}
+
+function isDebugEnabled(): boolean {
+  return process.env.DEBUG === 'true'
+}
+
+function logIndexerDebug(
+  message: string,
+  data?: Record<string, unknown>
+): void {
+  if (!isDebugEnabled()) {
+    return
+  }
+
+  if (!data) {
+    console.info(`[indexer] ${message}`)
+    return
+  }
+
+  console.info(`[indexer] ${message}`, data)
 }
 
 export interface SessionGroupSummary {
@@ -108,7 +128,9 @@ function recomputeSessionMetricsFromEvents(session: Session): void {
             ? usage.completion_tokens
             : completionTokens
         totalTokens =
-          typeof usage.total_tokens === 'number' ? usage.total_tokens : totalTokens
+          typeof usage.total_tokens === 'number'
+            ? usage.total_tokens
+            : totalTokens
       }
     }
 
@@ -192,7 +214,10 @@ function mergeOrphanSessionIntoTarget(target: Session, orphan: Session): void {
   if (!target.model && orphan.model) {
     target.model = orphan.model
   }
-  if (new Date(orphan.firstSeenAt).getTime() < new Date(target.firstSeenAt).getTime()) {
+  if (
+    new Date(orphan.firstSeenAt).getTime() <
+    new Date(target.firstSeenAt).getTime()
+  ) {
     target.firstSeenAt = orphan.firstSeenAt
   }
 
@@ -358,13 +383,19 @@ function getSessionRequestMetrics(session: Session): {
   }
 
   const requestStartMs =
-    parseTimestampMs(session.request?.ts) ?? earliestEventMs ?? parseTimestampMs(session.firstSeenAt)
+    parseTimestampMs(session.request?.ts) ??
+    earliestEventMs ??
+    parseTimestampMs(session.firstSeenAt)
   const requestEndMs = latestEventMs ?? requestStartMs
 
   const requestStartedAt =
-    requestStartMs !== undefined ? new Date(requestStartMs).toISOString() : undefined
+    requestStartMs !== undefined
+      ? new Date(requestStartMs).toISOString()
+      : undefined
   const requestEndedAt =
-    requestEndMs !== undefined ? new Date(requestEndMs).toISOString() : undefined
+    requestEndMs !== undefined
+      ? new Date(requestEndMs).toISOString()
+      : undefined
 
   const requestElapsedMs =
     requestStartMs !== undefined && requestEndMs !== undefined
@@ -453,7 +484,9 @@ export function getSessionGroupSummaries(
           typeof completionTokens === 'number' ? completionTokens : undefined,
         sessionAverageTokensPerSecond: initialTps,
         sessionTotalPromptProcessingMs:
-          typeof promptProcessingMs === 'number' ? promptProcessingMs : undefined,
+          typeof promptProcessingMs === 'number'
+            ? promptProcessingMs
+            : undefined,
       })
       if (typeof tokensPerSecond === 'number') {
         tpsAccumulator.set(session.sessionGroupId, {
@@ -718,7 +751,8 @@ function isFileMetadataMatch(
   }
 
   return (
-    existing.mtimeMs === file.mtime.getTime() && existing.sizeBytes === file.size
+    existing.mtimeMs === file.mtime.getTime() &&
+    existing.sizeBytes === file.size
   )
 }
 
@@ -745,20 +779,14 @@ function buildPersistedIndex(): {
 } {
   const index = createEmptyIndex()
   const sourceSessionIds = new Map<string, Set<string>>()
-  const storedSessions = loadStoredSessions().sort(
-    (left, right) =>
-      new Date(left.session.firstSeenAt).getTime() -
-      new Date(right.session.firstSeenAt).getTime()
-  )
-
-  for (const storedSession of storedSessions) {
+  forEachStoredSession((storedSession) => {
     if (isOrphanSession(storedSession.session)) {
       if (tryAttachOrphanSession(index, storedSession.session)) {
-        continue
+        return
       }
 
       // If no earlier request exists yet, keep current behavior and skip indexing.
-      continue
+      return
     }
 
     addSessionToIndex(index, storedSession.session)
@@ -772,7 +800,7 @@ function buildPersistedIndex(): {
         new Set([storedSession.session.sessionId])
       )
     }
-  }
+  })
 
   return {
     index,
@@ -812,13 +840,12 @@ export async function buildIndex(
   logFiles?: LogFile[],
   options?: BuildIndexOptions
 ): Promise<SessionIndex> {
+  const buildStartedAt = Date.now()
   const files = logFiles || getAllLogFiles()
   const indexedFiles = listIndexedFiles()
   const latestFilePath = getLatestFilePath(files)
-  const {
-    index,
-    sourceSessionIds: sessionsBySourcePath,
-  } = buildPersistedIndex()
+  const { index, sourceSessionIds: sessionsBySourcePath } =
+    buildPersistedIndex()
 
   const currentPaths = new Set(files.map((file) => file.path))
   const removedPaths = deleteMissingFiles(currentPaths)
@@ -834,6 +861,12 @@ export async function buildIndex(
   }
 
   let processedFiles = 0
+  logIndexerDebug('build started', {
+    totalFiles: files.length,
+    reparseAll: options?.reparseAll === true,
+    latestFilePath,
+  })
+
   options?.onProgress?.({
     totalFiles: files.length,
     processedFiles,
@@ -841,6 +874,7 @@ export async function buildIndex(
   })
 
   for (const file of files) {
+    const fileStartedAt = Date.now()
     const existing = indexedFiles.get(file.path)
     const shouldAlwaysReparse =
       options?.reparseAll === true || file.path === latestFilePath
@@ -886,16 +920,20 @@ export async function buildIndex(
 
         const processedFilesSnapshot = processedFiles
         const sessionsIndexedSnapshot = index.sessions.size
-        const parsedSessions = await parseLogFile(file.path, (fractionComplete) => {
-          options?.onProgress?.({
-            totalFiles: files.length,
-            processedFiles: processedFilesSnapshot + fractionComplete,
-            currentFile: file.path,
-            sessionsIndexed: sessionsIndexedSnapshot,
-          })
-        })
+        const parsedSessions = await parseLogFile(
+          file.path,
+          (fractionComplete) => {
+            options?.onProgress?.({
+              totalFiles: files.length,
+              processedFiles: processedFilesSnapshot + fractionComplete,
+              currentFile: file.path,
+              sessionsIndexed: sessionsIndexedSnapshot,
+            })
+          }
+        )
 
-        const previousSessionIds = sessionsBySourcePath.get(file.path) || new Set()
+        const previousSessionIds =
+          sessionsBySourcePath.get(file.path) || new Set()
         removeSessionsFromIndex(index, previousSessionIds)
 
         const sessionsToPersist: ParsedFileSession[] = []
@@ -935,6 +973,17 @@ export async function buildIndex(
         })
 
         options?.onIndexUpdate?.(index)
+        logIndexerDebug('file parsed', {
+          filePath: file.path,
+          elapsedMs: Date.now() - fileStartedAt,
+          sessionsIndexed: index.sessions.size,
+        })
+      } else {
+        logIndexerDebug('file skipped', {
+          filePath: file.path,
+          elapsedMs: Date.now() - fileStartedAt,
+          reason: 'metadata unchanged',
+        })
       }
     } catch (error) {
       console.error(`Failed to index file: ${file.path}`, error)
@@ -956,6 +1005,12 @@ export async function buildIndex(
     totalFiles: files.length,
     processedFiles,
     sessionsIndexed: index.sessions.size,
+  })
+
+  logIndexerDebug('build completed', {
+    totalFiles: files.length,
+    sessionsIndexed: index.sessions.size,
+    elapsedMs: Date.now() - buildStartedAt,
   })
 
   return index

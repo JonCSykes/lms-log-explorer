@@ -22,6 +22,10 @@ import {
   SidebarRail,
 } from '@/components/ui/sidebar'
 import { getClientIcon } from '@/lib/clientIcons'
+import {
+  compareLogTimestampsAsc,
+  extractDateKeyFromTimestamp,
+} from '@/lib/logTimestamp'
 import { type ClientType } from '@/types'
 
 interface SessionEntry {
@@ -85,8 +89,10 @@ export default function SessionsSidebar({
       }
 
       if (
-        new Date(session.sessionStartedAt).getTime() <
-        new Date(existing.sessionStartedAt).getTime()
+        compareLogTimestampsAsc(
+          session.sessionStartedAt,
+          existing.sessionStartedAt
+        ) < 0
       ) {
         existing.sessionStartedAt = session.sessionStartedAt
       }
@@ -99,7 +105,10 @@ export default function SessionsSidebar({
         existing.sessionName = session.sessionName
       }
 
-      if (existing.sessionClient === 'Unknown' && session.sessionClient !== 'Unknown') {
+      if (
+        existing.sessionClient === 'Unknown' &&
+        session.sessionClient !== 'Unknown'
+      ) {
         existing.sessionClient = session.sessionClient
       }
 
@@ -125,8 +134,10 @@ export default function SessionsSidebar({
       })
       .sort(
         (left, right) =>
-          new Date(right.sessionStartedAt).getTime() -
-          new Date(left.sessionStartedAt).getTime()
+          compareLogTimestampsAsc(
+            right.sessionStartedAt,
+            left.sessionStartedAt
+          )
       )
   }, [searchQuery, sessions])
 
@@ -141,10 +152,9 @@ export default function SessionsSidebar({
     >()
 
     for (const sessionGroup of sessionGroups) {
-      const startDate = new Date(sessionGroup.sessionStartedAt)
-      const dayKey = Number.isNaN(startDate.getTime())
-        ? 'Unknown Date'
-        : startDate.toISOString().slice(0, 10)
+      const dayKey =
+        extractDateKeyFromTimestamp(sessionGroup.sessionStartedAt) ||
+        'Unknown Date'
       const dayLabel =
         dayKey === 'Unknown Date'
           ? dayKey
@@ -179,7 +189,11 @@ export default function SessionsSidebar({
   }
 
   return (
-    <Sidebar collapsible="icon" defaultWidth={352}>
+    <Sidebar
+      collapsible="icon"
+      defaultWidth={352}
+      data-testid="sessions-sidebar"
+    >
       <SidebarHeader className="gap-3 px-3 py-3">
         <div className="flex items-center gap-3">
           <div className="flex h-12 w-12 shrink-0 items-center justify-center overflow-hidden rounded-md">
@@ -204,6 +218,7 @@ export default function SessionsSidebar({
               value={searchQuery}
               onChange={(event) => setSearchQuery(event.target.value)}
               className="pl-8"
+              data-testid="sessions-search-input"
             />
           </div>
         </div>
@@ -223,6 +238,7 @@ export default function SessionsSidebar({
               onClick={() => onRefresh?.()}
               disabled={!onRefresh}
               aria-label="Refresh sessions"
+              data-testid="sessions-refresh-button"
             >
               <RefreshCw className="size-4" />
             </Button>
@@ -243,6 +259,7 @@ export default function SessionsSidebar({
                     <button
                       type="button"
                       className="w-full rounded-md px-2 py-1 text-left text-xs font-medium uppercase tracking-wide text-muted-foreground hover:bg-sidebar-accent/40 group-data-[collapsible=icon]/sidebar-wrapper:hidden"
+                      data-testid="sessions-day-toggle"
                     >
                       {group.dayLabel}
                     </button>
@@ -250,7 +267,9 @@ export default function SessionsSidebar({
                   <CollapsibleContent>
                     <SidebarMenu>
                       {group.sessions.map((sessionGroup) => {
-                        const clientIcon = getClientIcon(sessionGroup.sessionClient)
+                        const clientIcon = getClientIcon(
+                          sessionGroup.sessionClient
+                        )
                         const sessionSubtitle = sessionGroup.sessionModel
                           ? `${sessionGroup.sessionModel} • ${sessionGroup.sessionRequestCount} requests`
                           : `${sessionGroup.sessionRequestCount} requests`
@@ -259,13 +278,17 @@ export default function SessionsSidebar({
                           <SidebarMenuItem key={sessionGroup.sessionGroupId}>
                             <SidebarMenuButton
                               isActive={
-                                selectedSessionGroupId === sessionGroup.sessionGroupId
+                                selectedSessionGroupId ===
+                                sessionGroup.sessionGroupId
                               }
                               onClick={() =>
-                                onSelectSessionGroup(sessionGroup.sessionGroupId)
+                                onSelectSessionGroup(
+                                  sessionGroup.sessionGroupId
+                                )
                               }
                               title={sessionGroup.sessionClient}
                               className="px-3 group-data-[collapsible=icon]/sidebar-wrapper:justify-center"
+                              data-testid="session-group-button"
                             >
                               {clientIcon ? (
                                 <span
@@ -295,13 +318,16 @@ export default function SessionsSidebar({
                               )}
                               <div className="flex w-full flex-col gap-1 group-data-[collapsible=icon]/sidebar-wrapper:hidden">
                                 <span className="truncate text-left text-sm font-medium">
-                                  {sessionGroup.sessionName || sessionGroup.sessionGroupId}
+                                  {sessionGroup.sessionName ||
+                                    sessionGroup.sessionGroupId}
                                 </span>
                                 <span className="truncate text-left text-xs text-muted-foreground">
                                   {sessionSubtitle}
                                 </span>
                                 <span className="text-left text-xs whitespace-nowrap text-muted-foreground">
-                                  {formatTimestamp(sessionGroup.sessionStartedAt)}
+                                  {formatTimestamp(
+                                    sessionGroup.sessionStartedAt
+                                  )}
                                 </span>
                               </div>
                             </SidebarMenuButton>

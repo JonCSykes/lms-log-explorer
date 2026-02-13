@@ -318,9 +318,51 @@ export function listIndexedFiles(): Map<string, IndexedFileRecord> {
   return map
 }
 
-export function loadStoredSessions(): StoredSessionRecord[] {
+function toStoredSessionRecord(row: SessionRow): StoredSessionRecord {
+  const requestValue = parseJson<Session['request'] | null>(
+    row.request_json,
+    null
+  )
+  const parsedEvents = parseJson<Session['events']>(row.events_json, [])
+  const parsedToolCalls = parseJson<Session['toolCalls']>(
+    row.tool_calls_json,
+    []
+  )
+  const parsedMetrics = parseJson<Session['metrics']>(row.metrics_json, {})
+  const identity = extractSessionIdentityFromRequest(requestValue ?? undefined)
+  const sessionGroupKey = buildSessionGroupKey(
+    row.session_id,
+    identity.systemMessageChecksum,
+    identity.userMessageChecksum
+  )
+  const sessionGroupId = buildSessionGroupId(sessionGroupKey)
+
+  return {
+    sourcePath: row.source_path,
+    sourceOrdinal: row.source_ordinal,
+    session: {
+      sessionId: row.session_id,
+      chatId: row.chat_id || undefined,
+      firstSeenAt: row.first_seen_at,
+      sessionGroupKey,
+      sessionGroupId,
+      client: identity.client,
+      systemMessageChecksum: identity.systemMessageChecksum,
+      userMessageChecksum: identity.userMessageChecksum,
+      model: row.model || undefined,
+      request: requestValue ?? undefined,
+      events: parsedEvents,
+      toolCalls: parsedToolCalls,
+      metrics: parsedMetrics,
+    },
+  }
+}
+
+export function forEachStoredSession(
+  onRecord: (record: StoredSessionRecord) => void
+): void {
   const db = getDatabase()
-  const rows = db
+  const statement = db
     .prepare<[], SessionRow>(
       `
         SELECT
@@ -335,50 +377,22 @@ export function loadStoredSessions(): StoredSessionRecord[] {
           source_path,
           source_ordinal
         FROM sessions
-        ORDER BY first_seen_at DESC
+        ORDER BY first_seen_at ASC
       `
     )
-    .all()
 
-  return rows.map((row) => {
-    const requestValue = parseJson<Session['request'] | null>(
-      row.request_json,
-      null
-    )
-    const parsedEvents = parseJson<Session['events']>(row.events_json, [])
-    const parsedToolCalls = parseJson<Session['toolCalls']>(
-      row.tool_calls_json,
-      []
-    )
-    const parsedMetrics = parseJson<Session['metrics']>(row.metrics_json, {})
-    const identity = extractSessionIdentityFromRequest(requestValue ?? undefined)
-    const sessionGroupKey = buildSessionGroupKey(
-      row.session_id,
-      identity.systemMessageChecksum,
-      identity.userMessageChecksum
-    )
-    const sessionGroupId = buildSessionGroupId(sessionGroupKey)
+  for (const row of statement.iterate()) {
+    onRecord(toStoredSessionRecord(row))
+  }
+}
 
-    return {
-      sourcePath: row.source_path,
-      sourceOrdinal: row.source_ordinal,
-      session: {
-        sessionId: row.session_id,
-        chatId: row.chat_id || undefined,
-        firstSeenAt: row.first_seen_at,
-        sessionGroupKey,
-        sessionGroupId,
-        client: identity.client,
-        systemMessageChecksum: identity.systemMessageChecksum,
-        userMessageChecksum: identity.userMessageChecksum,
-        model: row.model || undefined,
-        request: requestValue ?? undefined,
-        events: parsedEvents,
-        toolCalls: parsedToolCalls,
-        metrics: parsedMetrics,
-      },
-    }
+export function loadStoredSessions(): StoredSessionRecord[] {
+  const sessions: StoredSessionRecord[] = []
+  forEachStoredSession((record) => {
+    sessions.push(record)
   })
+
+  return sessions
 }
 
 export function replaceFileSessions(input: ReplaceFileSessionsInput): void {

@@ -408,6 +408,7 @@ export function build(lines: LogLine[]): SessionData[] {
   const sessions: SessionData[] = []
   const logicalLines = combineMultilineJsonLines(lines)
   let currentSession: SessionState | null = null
+  const pendingPreRequestEvents: ParserEvent[] = []
 
   for (const line of logicalLines) {
     const event = classifyLogLine(line)
@@ -415,7 +416,12 @@ export function build(lines: LogLine[]): SessionData[] {
       continue
     }
 
-    currentSession = processEvent(event, sessions, currentSession)
+    currentSession = processEvent(
+      event,
+      sessions,
+      currentSession,
+      pendingPreRequestEvents
+    )
   }
 
   if (currentSession) {
@@ -432,6 +438,7 @@ export async function buildAsync(
   const sessions: SessionData[] = []
   const logicalLines = await combineMultilineJsonLinesAsync(lines, options)
   let currentSession: SessionState | null = null
+  const pendingPreRequestEvents: ParserEvent[] = []
 
   for (let i = 0; i < logicalLines.length; i++) {
     const line = logicalLines[i]
@@ -440,7 +447,12 @@ export async function buildAsync(
     } else {
       const event = classifyLogLine(line)
       if (event) {
-        currentSession = processEvent(event, sessions, currentSession)
+        currentSession = processEvent(
+          event,
+          sessions,
+          currentSession,
+          pendingPreRequestEvents
+        )
       }
     }
 
@@ -465,7 +477,8 @@ export async function buildAsync(
 function processEvent(
   event: ParserEvent,
   sessions: SessionData[],
-  currentSession: SessionState | null
+  currentSession: SessionState | null,
+  pendingPreRequestEvents: ParserEvent[]
 ): SessionState | null {
   if (event.type === 'request_received') {
     if (currentSession) {
@@ -480,67 +493,59 @@ function processEvent(
       ts: requestEvent.ts,
       data: requestEvent.data,
     })
+    replayPendingPreRequestEvents(nextSession, pendingPreRequestEvents)
     return nextSession
   }
 
-  if (event.type === 'stream_packet') {
-    if (!currentSession) {
-      const nextSession = createSession((event as StreamPacketEvent).ts)
-      processStreamPacket(nextSession, event as StreamPacketEvent)
-      return nextSession
-    }
+  if (!currentSession) {
+    pendingPreRequestEvents.push(event)
+    return null
+  }
 
-    if (!isEventAttachableToCurrentRequest(currentSession, event.ts)) {
-      return currentSession
-    }
-
-    processStreamPacket(currentSession, event as StreamPacketEvent)
+  if (!isEventAttachableToCurrentRequest(currentSession, event.ts)) {
     return currentSession
+  }
+
+  processNonRequestEvent(currentSession, event)
+  return currentSession
+}
+
+function replayPendingPreRequestEvents(
+  state: SessionState,
+  pendingPreRequestEvents: ParserEvent[]
+): void {
+  for (const pendingEvent of pendingPreRequestEvents) {
+    if (!isEventAttachableToCurrentRequest(state, pendingEvent.ts)) {
+      continue
+    }
+
+    processNonRequestEvent(state, pendingEvent)
+  }
+
+  pendingPreRequestEvents.length = 0
+}
+
+function processNonRequestEvent(state: SessionState, event: ParserEvent): void {
+  if (event.type === 'stream_packet') {
+    processStreamPacket(state, event as StreamPacketEvent)
+    return
   }
 
   if (event.type === 'prompt_processing') {
-    if (!currentSession) {
-      const nextSession = createSession(event.ts)
-      processPromptProcessing(nextSession, event as PromptProcessingEvent)
-      return nextSession
-    }
-
-    if (!isEventAttachableToCurrentRequest(currentSession, event.ts)) {
-      return currentSession
-    }
-
-    processPromptProcessing(currentSession, event as PromptProcessingEvent)
-    return currentSession
+    processPromptProcessing(state, event as PromptProcessingEvent)
+    return
   }
 
   if (event.type === 'stream_finished') {
-    if (!currentSession) {
-      const nextSession = createSession(event.ts)
-      nextSession.events.push({
-        id: `stream-finished-${event.ts}`,
-        type: 'stream_finished',
-        ts: event.ts,
-      })
-      nextSession.timingTracker.recordStreamFinished(event.ts)
-      return nextSession
-    }
-
-    if (!isEventAttachableToCurrentRequest(currentSession, event.ts)) {
-      return currentSession
-    }
-
-    flushPromptAccumulator(currentSession)
-    flushStreamAccumulator(currentSession)
-    currentSession.events.push({
+    flushPromptAccumulator(state)
+    flushStreamAccumulator(state)
+    state.events.push({
       id: `stream-finished-${event.ts}`,
       type: 'stream_finished',
       ts: event.ts,
     })
-    currentSession.timingTracker.recordStreamFinished(event.ts)
-    return currentSession
+    state.timingTracker.recordStreamFinished(event.ts)
   }
-
-  return currentSession
 }
 
 function createSession(

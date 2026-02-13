@@ -1,7 +1,12 @@
 node_modules
 .next
+.next-playwright
 out
 dist
 .DS_Store
 .env
 .env.local
+.tmp
+playwright-report
+test-results
+/.idea/
