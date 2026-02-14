@@ -1,386 +1,533 @@
-## LMS Log Dashboard — Product & Technical Spec (v0.1)
+# LMS Log Explorer Product Specification
 
-A simple, standalone **Next.js + TypeScript** web app that reads **LM Studio server log files** on the local machine (Mac first) and renders a “developer-friendly” dashboard for exploring sessions (“chat ids”), tool calls, metrics, and a full session timeline with prompts/responses.
+## 1. Purpose
 
----
+LMS Log Explorer is a local-first web application for understanding what happened
+inside LM Studio chat-completion runs. The product transforms raw server logs
+into a structured investigation workspace where developers can inspect prompts,
+responses, tool calls, and performance signals.
 
-# 1) Goals
+The core promise is operational clarity: when a run is slow, incorrect, or
+surprising, users can quickly identify what request was sent, what events
+occurred, and where time and tokens were spent.
 
-## Primary goals
+## 2. Target Users and Jobs
 
-- **Discover sessions quickly:** left nav lists unique **Chat IDs** (grouping key).
-- **Understand what happened:** right pane shows:
-  1. **Tool Calls** (what tool was requested, payload, timing)
-  2. **Performance Metrics** (session-level totals + derived metrics)
-  3. **Session Timeline** (high fidelity prompt/response and key events with durations)
+Primary users are developers running LM Studio locally.
 
-## Non-goals (initially)
+Primary jobs:
+
+- find the exact request behind a behavior regression
+- audit prompt and message context
+- inspect tool-call arguments and sequence
+- compare token/latency patterns across related requests
+- confirm indexing progress and data freshness
+
+## 3. Product Scope
+
+LMS Log Explorer reads LM Studio logs from local disk, parses those logs into
+structured entities, persists an index in local SQLite, and serves a web UI for
+exploration.
+
+In scope:
+
+- log discovery from `LMS_LOG_ROOT`
+- request/session reconstruction
+- timeline and tool-call visibility
+- request and session-group metrics
+- searchable session navigation
+- server API for status/list/detail/settings
+- optional AI-powered session naming
+
+Out of scope:
+
+- mutating LM Studio logs
+- multi-user access control and tenanting
+- centralized remote log ingestion service
+
+## 4. End-to-End Behavior
+
+1. The app discovers LM Studio log files by month/day naming conventions.
+2. The parser classifies lines and reconstructs multiline JSON payloads.
+3. Request sessions are formed with timeline events, tool calls, and metrics.
+4. Sessions are grouped by prompt identity into parent session groups.
+5. Indexed records are persisted to SQLite for fast reload and incremental refresh.
+6. The UI renders session groups, request summaries, and request-level detail.
+7. Background indexing updates progress while preserving UI responsiveness.
+
+## 5. Domain Schema
+
+This section defines the product’s conceptual data schema and includes concrete
+examples that mirror API/UI contracts.
+
+### 5.1 Entity: Session Group
+
+A session group represents related requests that share deterministic prompt
+identity (derived from message checksums).
+
+Core fields:
+
+- `sessionGroupId`
+- `sessionGroupKey`
+- `sessionName` (optional display label)
+- `sessionStartedAt`
+- `sessionModel`
+- `sessionClient`
+- aggregate metrics and request count
+
+Example:
+
+```json
+{
+  "sessionGroupId": "session-group-3a9f8d2e4b01",
+  "sessionGroupKey": "1c67...f2a:be42...77d",
+  "sessionName": "Refactor parser event flow",
+  "sessionStartedAt": "2026-02-12T16:21:04.000Z",
+  "sessionModel": "qwen/qwen3-coder-next",
+  "sessionClient": "Codex",
+  "sessionRequestCount": 4,
+  "sessionTotalInputTokens": 7824,
+  "sessionTotalOutputTokens": 2410,
+  "sessionAverageTokensPerSecond": 38.7,
+  "sessionTotalPromptProcessingMs": 18600
+}
+```
+
+### 5.2 Entity: Request Session
+
+A request session is the unit opened in the request drawer and timeline.
+
+Core fields:
+
+- `sessionId` (deterministic id)
+- optional `chatId`
+- `firstSeenAt`
+- `request`
+- `events[]`
+- `toolCalls[]`
+- `metrics`
+
+Example:
+
+```json
+{
+  "sessionId": "session-7dcb0f8a4e21-0003",
+  "chatId": "chatcmpl-35pncf4xh3futbql1zq2o",
+  "firstSeenAt": "2026-02-12T16:21:04.000Z",
+  "sessionGroupId": "session-group-3a9f8d2e4b01",
+  "client": "Codex",
+  "request": {
+    "id": "request-2026-02-12T16:21:04.000Z",
+    "type": "request",
+    "ts": "2026-02-12T16:21:04.000Z",
+    "method": "POST",
+    "endpoint": "/v1/chat/completions",
+    "body": {
+      "model": "qwen/qwen3-coder-next",
+      "messages": [
+        { "role": "system", "content": "You are Codex" },
+        { "role": "user", "content": "Review parser logic" }
+      ]
+    }
+  },
+  "metrics": {
+    "promptTokens": 1200,
+    "completionTokens": 420,
+    "totalTokens": 1620,
+    "promptProcessingMs": 3400,
+    "streamLatencyMs": 10800,
+    "tokensPerSecond": 38.9
+  }
+}
+```
+
+### 5.3 Entity: Timeline Event
+
+Timeline events are normalized and timestamped. The event stream is chronological.
+
+Event types:
+
+- `request`
+- `prompt_processing`
+- `stream_chunk`
+- `tool_call`
+- `usage`
+- `stream_finished`
+
+Example event sequence:
+
+```json
+[
+  {
+    "id": "request-2026-02-12T16:21:04.000Z",
+    "type": "request",
+    "ts": "2026-02-12T16:21:04.000Z"
+  },
+  {
+    "id": "prompt-processing-2026-02-12T16:21:07.000Z-9",
+    "type": "prompt_processing",
+    "ts": "2026-02-12T16:21:09.000Z",
+    "data": {
+      "eventCount": 9,
+      "elapsedMs": 2000,
+      "firstPromptTs": "2026-02-12T16:21:07.000Z",
+      "lastPromptTs": "2026-02-12T16:21:09.000Z",
+      "lastPercent": 100
+    }
+  },
+  {
+    "id": "stream-response-2026-02-12T16:21:10.000Z-1",
+    "type": "stream_chunk",
+    "ts": "2026-02-12T16:21:20.000Z",
+    "data": {
+      "chunkCount": 214,
+      "elapsedMs": 10000,
+      "firstChunkTs": "2026-02-12T16:21:10.000Z",
+      "lastChunkTs": "2026-02-12T16:21:20.000Z",
+      "responseText": "I reviewed the parser and found..."
+    }
+  },
+  {
+    "id": "usage-2026-02-12T16:21:20.000Z-4",
+    "type": "usage",
+    "ts": "2026-02-12T16:21:20.000Z",
+    "data": {
+      "prompt_tokens": 1200,
+      "completion_tokens": 420,
+      "total_tokens": 1620
+    }
+  }
+]
+```
+
+### 5.4 Entity: Tool Call
+
+Tool calls are merged from streaming deltas and exposed as request-level records.
+
+Example:
+
+```json
+{
+  "id": "call_abc123",
+  "type": "tool_call",
+  "ts": "2026-02-12T16:21:14.000Z",
+  "toolCallId": "call_abc123",
+  "name": "glob",
+  "argumentsText": "{\"pattern\":\"**/*.ts\"}",
+  "argumentsJson": {
+    "pattern": "**/*.ts"
+  }
+}
+```
+
+### 5.5 Entity: Session List Item
+
+Session list items are optimized for sidebar/main-table rendering.
+
+Example:
+
+```json
+{
+  "sessionId": "session-7dcb0f8a4e21-0003",
+  "chatId": "chatcmpl-35pncf4xh3futbql1zq2o",
+  "firstSeenAt": "2026-02-12T16:21:04.000Z",
+  "requestStartedAt": "2026-02-12T16:21:04.000Z",
+  "requestEndedAt": "2026-02-12T16:21:20.000Z",
+  "requestElapsedMs": 16000,
+  "requestPromptProcessingMs": 2000,
+  "requestToolCallCount": 1,
+  "requestTokensPerSecond": 38.9,
+  "promptTokens": 1200,
+  "completionTokens": 420,
+  "streamLatencyMs": 10800,
+  "sessionGroupId": "session-group-3a9f8d2e4b01",
+  "sessionName": "Refactor parser event flow"
+}
+```
+
+## 6. Functional Requirements
+
+### 6.1 Log Ingestion and Indexing
+
+The system must:
+
+- resolve `LMS_LOG_ROOT` with home-path expansion
+- discover month/day `.log` files in LM Studio folder layout
+- perform incremental indexing using file metadata + checksums
+- always reparse the latest log file to capture append-only writes
+- persist sessions, file metadata, and naming/settings metadata in SQLite
+- expose indexing state: `idle`, `indexing`, `ready`, `error`
+
+### 6.2 Parsing and Correlation
+
+The parser must:
+
+- accept both `[ts][level]` and `[ts][level][model]` line prefixes
+- treat non-prefixed lines as continuation lines when reconstructing JSON
+- parse multiline request and packet JSON with brace/string/escape handling
+- anchor session creation on request events
+- aggregate prompt progress and stream chunks for readable timelines
+- merge tool-call argument fragments by id/index fallback rules
+- preserve recoverable data when malformed/truncated JSON is encountered
+
+### 6.3 Metrics and Derivations
+
+The system must compute and expose:
+
+- token metrics: `promptTokens`, `completionTokens`, `totalTokens`
+- timing metrics: `promptProcessingMs`, `streamLatencyMs`, `requestElapsedMs`
+- throughput metric: `tokensPerSecond`
+- request-level convenience summaries for list/table surfaces
+
+Missing values remain unset rather than estimated from unsupported assumptions.
+
+## 7. API Surface
+
+### 7.1 Index and Status
+
+- `GET /api/index` returns readiness + indexing status
+- `POST /api/index` schedules rebuild (`?force=1` supported)
+
+Example status payload:
+
+```json
+{
+  "ready": true,
+  "sessionCount": 2767,
+  "status": {
+    "state": "ready",
+    "totalFiles": 31,
+    "processedFiles": 31,
+    "sessionsIndexed": 2767
+  }
+}
+```
+
+### 7.2 Session Data
+
+- `GET /api/sessions` returns paginated session list (`limit`, `offset`, `q`)
+- `GET /api/sessions/chatId` returns request-session detail by `sessionId` or `chatId`
+
+Example list response shape:
+
+```json
+{
+  "sessions": [{ "sessionId": "session-...", "sessionGroupId": "session-group-..." }],
+  "totalCount": 2767,
+  "status": { "state": "ready" }
+}
+```
+
+### 7.3 Settings and Renaming
+
+- `GET/POST /api/settings` for AI session renamer configuration
+- `POST /api/session-renamer/run` for explicit rename execution
+
+### 7.4 Debug
+
+- `GET /api/debug/index` provides diagnostic summary when `DEBUG=true`
 
-- Windows support (later).
-- Editing logs or sending anything to LM Studio.
-- Multi-user auth (assume local/dev use).
+## 8. UI/UX by Screen
+
+### 8.1 Screen: Session Workspace (`/`)
+
+Purpose:
+
+- provide the default investigation workspace
+
+Structure:
+
+- left: sessions sidebar
+- top header: selected session title, settings, refresh, theme toggle
+- main: Session Overview, Stats, Prompt Audit, Requests
+
+Primary interactions:
 
----
+- select a session group
+- refresh index
+- expand/collapse content cards
 
-# 2) Target Users
+### 8.2 Screen: Sessions Sidebar (left navigation)
 
-- Developers running LM Studio locally who want to **audit prompts**, **evaluate tool usage**, and **debug latency / throughput** from the server logs.
+Purpose:
 
----
+- fast navigation across session groups
 
-# 3) Data Source
+Structure:
 
-## Mac log location (v0)
+- branding header
+- search input
+- date-grouped collapsible sections
+- session-group buttons with client icon, subtitle, timestamp
 
-- `~/.lmstudio/server-logs/[yyyy-mm]/[yyyy-mm-dd].#.log`
+Interaction details:
 
-## In scope (from your sample log)
+- search filters by name/group/client/model
+- date groups are collapsible
+- selecting a row loads that session group in main content
 
-The logs include repeating patterns such as:
+### 8.3 Screen: Session Overview Card
 
-- `Received request: POST to /v1/chat/completions with body { ... }`
-- Streaming output packets: `Generated packet: { ... }`
-- End of streaming: `Finished streaming response`
-- Prompt processing progress: `Prompt processing progress: X%`
-- Final streaming chunk includes `"usage": { "prompt_tokens": ..., "completion_tokens": ... }`
-- Tool call deltas appear as `"tool_calls": [...]` inside streamed packets
+Purpose:
 
----
+- summarize high-level behavior of the selected session group
 
-# 4) Key Concepts & Definitions
+Content:
 
-## Session / Chat ID
+- client and model
+- request count
+- total input/output tokens
+- average tokens per second
+- prompt processing, elapsed time, idle time, and agent work time
 
-- **Chat ID** = the `"id"` found in streamed packets, e.g. `chatcmpl-...`
-- A “session” is the sequence of events for that Chat ID:
-  - request received
-  - prompt processing
-  - streaming packets
-  - usage summary
-  - finish streaming
+UX behavior:
 
-## Tool Call (as observed from logs)
+- collapsible panel
+- intended for quick triage before opening request-level details
 
-- Tool calls show up in streamed deltas as `delta.tool_calls[]` with:
-  - `tool_call.id`
-  - `function.name`
-  - `function.arguments` (may be empty or partial depending on streaming)
+### 8.4 Screen: Stats Card
 
-**Important reality check:** LM Studio logs show the model _requesting_ tool calls. The actual tool execution likely happens in the client (e.g., your CLI), so true tool runtime might not be directly logged. In v0, tool timing should be **best-effort derived** (details below).
+Purpose:
 
----
+- visualize request-level trends within a session group
 
-# 5) UI/UX Spec
+Content:
 
-## Layout
+- line chart for tokens/second and total tokens over time
+- tooltip and brush range selection
 
-**Two-pane layout**
+UX behavior:
 
-- **Left sidebar**: searchable list of Chat IDs
-- **Right content area**: details for selected Chat ID
+- collapsible panel
+- displays guidance when chart data is insufficient
 
-Use **Tailwind + shadcn/ui only**.
+### 8.5 Screen: Prompt Audit Card
 
-### Left Sidebar
+Purpose:
 
-- Header: “Sessions”
-- Controls:
-  - Search input (filter Chat IDs)
-  - Optional date filter (later; v0 can just show newest-first)
-- List items:
-  - Chat ID (truncated with copy button)
-  - Timestamp of first event in session
-  - Small badges: model name, token totals (if available)
+- inspect message context used by the model
 
-**Sorting:** newest session first.
+Content:
 
----
+- tabbed views: `Messages` and `System`
+- Messages includes ordered user/assistant flow and developer messages block
+- System includes one or more system message entries
 
-## Main Page Sections (Right Pane)
+UX behavior:
 
-### 1) Tool Calls
+- collapsible card, closed by default
+- long content remains scrollable/readable
 
-Each tool call displayed as a **card/accordion row**:
+### 8.6 Screen: Requests Card
 
-**Fields**
+Purpose:
 
-- Tool name (e.g. `glob`)
-- Tool call id (e.g. `"id": "602238777"`)
-- Tool description (if it exists in the prompt/tool schema captured in logs; otherwise “Unknown”)
-- Arguments payload (rendered nicely)
-- Timing:
-  - **Requested at** timestamp (when first `tool_calls` delta appears)
-  - **Inferred duration** (see timing strategy below)
-- Raw JSON expand/collapse (for advanced debugging)
+- list all requests in the selected session group
 
-**Arguments rendering**
+Content columns:
 
-- If JSON parseable → show as a **shadcn Table** (key/value rows)
-- If not parseable (empty/partial streaming) → show as code block
+- request id
+- timestamp
+- tool call count
+- total elapsed time
+- total prompt processing time
+- input tokens
+- output tokens
 
-**Timing strategy (v0)**
+UX behavior:
 
-- If tool call appears and later you detect a subsequent request that includes a tool result (role `tool`, matching `tool_call_id`), then:
-  - `duration = next_request_timestamp - tool_call_requested_timestamp`
-- If not detectable:
-  - duration = “Unknown (client-side execution not present in server logs)”
+- row click opens request drawer
+- requests are ordered chronologically
 
----
+### 8.7 Screen: Request Drawer (right slide-out)
 
-### 2) Performance Metrics (Session-level)
+Purpose:
 
-Render as a **shadcn Table** with:
+- provide focused request-level inspection without leaving session context
 
-- Total Input Tokens (`usage.prompt_tokens`)
-- Total Output Tokens (`usage.completion_tokens`)
-- Latency (Stream start → finish)
-  - `stream_start`: first “Generated packet” timestamp for that chat id
-  - `stream_finish`: “Finished streaming response” timestamp for that chat id
-- Tokens per Second (Output)
-  - `completion_tokens / latency_seconds` (derived)
-- Prompt processing time
-  - `first_prompt_progress_timestamp (0%) → first_generated_packet_timestamp`
-  - If prompt progress isn’t present: “Unknown”
+Sections:
 
-Also include:
+- Request Data card
+- Tool Calls (collapsible, nested payload expansion)
+- Request Timeline (event cards with details + raw payload)
 
-- Model name (from request or packet)
-- Created timestamp (from packet `created` epoch, optional display)
+UX behavior:
 
----
+- overlay + slide-in interaction
+- close via close control or backdrop
+- maintains context of selected session group underneath
 
-### 3) Session Timeline
+### 8.8 Screen: Settings (`/settings`)
 
-A vertical timeline of “events” in chronological order. This is the “truth view”.
+Purpose:
 
-**Event types**
+- configure optional AI session naming behavior
 
-- Request Received
-  - Show endpoint and a summarized request body
-  - Expand to show full messages (system/user/assistant/tool)
-- Prompt Processing
-  - Show progress milestones and computed duration
-- Streaming Started / Streaming Chunks
-  - Show assistant output (reconstructed text from deltas if possible)
-  - Show tool call requests inline where they occur
-- Tool Call Requested
-  - Show tool name + args + id
-- Usage Summary
-  - Show tokens from final chunk usage
-- Streaming Finished
+Content:
 
-**Prompt visibility requirement**
+- enable/disable toggle
+- provider selector
+- model selector
+- API token override controls
+- save action
 
-- Display as much of:
-  - system prompt
-  - user prompt
-  - assistant content (streamed deltas)
-    as possible, with collapsible sections to avoid overwhelming the UI.
+UX behavior:
 
-**Durations**
-Each timeline node shows:
+- token-source awareness (env vs override)
+- safe defaults when unset
 
-- Timestamp
-- “Time since previous event”
-- If it’s a stage (prompt processing, streaming) show stage duration.
+### 8.9 Cross-Screen States
 
-**Reconstruction rules**
+The UI must handle and communicate:
 
-- Assistant content: concatenate `delta.content` in order for that chat id.
-- Tool calls: collect `delta.tool_calls[]` events and display at the moment they occur.
-- Request messages: show the `messages[]` array from the “Received request” JSON.
+- loading state (initial and per-request)
+- indexing-in-progress state with progress overlay
+- empty/no-results state
+- recoverable fetch/parsing error state with visible feedback
 
----
+## 9. Configuration
 
-# 6) Parsing & Data Model Spec
+Core:
 
-## Parsing approach
+- `LMS_LOG_ROOT`
+- `LMS_INDEX_DB_PATH`
+- `DEBUG`
 
-Implement a custom parser that reads `.log` files and emits structured events.
+Optional provider tokens:
 
-### Step 1 — Line classification
+- `OPENAI_API_KEY`
+- `ANTHROPIC_API_KEY`
+- `GEMINI_API_KEY` or `GOOGLE_API_KEY`
 
-Each log line starts like:
-`[YYYY-MM-DD HH:MM:SS][LEVEL]... message`
+## 10. Non-Functional Requirements
 
-Classify lines into:
+### 10.1 Reliability
 
-- **REQUEST_LINE**: contains `Received request: POST to /v1/chat/completions with body {`
-- **PACKET_LINE**: contains `Generated packet: {`
-- **STREAM_FINISH_LINE**: contains `Finished streaming response`
-- **PROMPT_PROGRESS_LINE**: contains `Prompt processing progress:`
-- **OTHER**: ignore or keep for raw view (optional)
+- parsing errors degrade gracefully without process crashes
+- indexing failures surface actionable status to clients
 
-### Step 2 — JSON extraction
+### 10.2 Performance
 
-Some lines introduce JSON that spans multiple lines. The parser should:
+- indexing supports large local log sets without full-memory loading
+- UI remains interactive while indexing runs
 
-- Detect start of JSON (`{`)
-- Accumulate subsequent lines until braces balance to zero
-- Then JSON.parse the block
+### 10.3 Security and Privacy
 
-This is needed for:
+- filesystem access is server-side only
+- external calls occur only for optional AI renaming
+- secrets are environment/config managed
 
-- request body JSON
-- generated packet JSON
+### 10.4 Observability
 
-### Step 3 — Session grouping
+- status/progress is queryable through API
+- debug summary endpoint is explicitly gated by `DEBUG=true`
 
-- When parsing a **packet JSON**, extract `packet.id` (chat id) and assign that event to that session.
-- When parsing a **request JSON**, you may not have chat id yet. Associate it with the “current pending request” and later link it to the next chat id that appears soon after (heuristic).
+## 11. Acceptance Criteria
 
-**Heuristic linking (v0 practical approach)**
+The product is acceptable when users can:
 
-- Maintain a rolling window of “latest request received timestamp + request JSON”
-- When first packet for a new chat id appears shortly after, attach that request as the session’s request.
-
-### Step 4 — Derived metrics
-
-Per chat id compute:
-
-- promptTokens, completionTokens from final usage chunk
-- promptProcessingTime (progress 0% → first packet timestamp)
-- streamLatency (first packet → finish line)
-- tokensPerSecond = completionTokens / streamLatency
-
-### Step 5 — Tool calls extraction
-
-From packet deltas:
-
-- `choices[].delta.tool_calls[]` collect:
-  - toolCallId, function.name, function.arguments
-  - timestamp (line time)
-- Merge partial argument strings if multiple deltas append arguments (common in streaming function calling).
-
----
-
-## Core Types (TypeScript)
-
-### `Session`
-
-- `chatId: string`
-- `firstSeenAt: string` (ISO)
-- `model?: string`
-- `request?: RequestEvent`
-- `events: TimelineEvent[]`
-- `toolCalls: ToolCallEvent[]`
-- `metrics: SessionMetrics`
-
-### `SessionMetrics`
-
-- `promptTokens?: number`
-- `completionTokens?: number`
-- `totalTokens?: number`
-- `promptProcessingMs?: number`
-- `streamLatencyMs?: number`
-- `tokensPerSecond?: number`
-
-### `TimelineEvent` (union)
-
-- `type: 'request' | 'prompt_progress' | 'stream_chunk' | 'tool_call' | 'usage' | 'stream_finished' | 'info'`
-- `ts: string` (ISO)
-- `data: ...`
-
----
-
-# 7) App Architecture
-
-## Next.js structure (App Router)
-
-- `/` → main dashboard page
-- API routes (server-only filesystem access):
-  - `GET /api/sessions` → list sessions (chat ids + summary)
-  - `GET /api/sessions/[chatId]` → full session payload (events + metrics + tool calls)
-  - `POST /api/reindex` (optional) → re-scan logs (or do it automatically)
-
-## Filesystem access constraints
-
-- The app needs to read from `~/.lmstudio/server-logs/...`
-- This must be done **server-side only** (Node `fs`), never in the browser.
-
-## Indexing strategy (v0)
-
-- On server start, scan the latest month folder (or last N days).
-- Parse logs into an in-memory index:
-  - `Map<chatId, Session>`
-- Cache results; provide “Refresh” button to rescan.
-
-## Performance considerations
-
-- Logs can be large. Use:
-  - streaming file read (Node readline)
-  - incremental brace-balancing JSON capture
-- Optional later: persist index in SQLite.
-
----
-
-# 8) UI Components (shadcn-only)
-
-Recommended shadcn primitives:
-
-- `Sidebar` pattern (custom layout + `ScrollArea`)
-- `Input` (search)
-- `Button` (refresh, copy)
-- `Card` / `Accordion` (tool calls)
-- `Table` (metrics + tool args key/value)
-- `Tabs` (optional: Tool Calls / Metrics / Timeline)
-- `Badge` (model, token counts)
-- `Separator`
-- `Collapsible` (raw JSON, full prompts)
-- `Code` blocks via `<pre>` styled with Tailwind (still fine; not a component dependency)
-
----
-
-# 9) MVP Acceptance Criteria
-
-## Session list
-
-- Loads and shows unique chat IDs from logs
-- Selecting a chat id updates URL (e.g. `/?session=chatcmpl-...`) and loads details
-
-## Tool Calls
-
-- Displays all tool call requests found in stream deltas
-- Shows name + id + arguments (parsed if JSON)
-- Shows best-effort duration strategy
-
-## Metrics
-
-- Shows tokens (prompt/completion/total) when usage exists
-- Shows stream latency
-- Shows tokens/sec derived
-
-## Timeline
-
-- Shows request messages (system + user + assistant if present in request)
-- Shows assistant streamed content reconstructed
-- Shows tool call events inline
-- Shows durations between events
-
----
-
-# 10) Roadmap (Post-MVP)
-
-1. **Windows support**
-   - configurable base path
-2. **Folder picker / config UI**
-   - allow user to override log directory
-3. **Better tool runtime correlation**
-   - if client logs exist, allow importing them and correlating
-4. **Export**
-   - export a session as JSON or markdown report
-5. **Full-text search**
-   - search within prompts/responses across sessions
-6. **Persistent index**
-   - SQLite for fast load on huge logs
-
----
-
-# 11) Repo & Dev Setup (Suggested)
-
-- `next@latest` (App Router) + TypeScript
-- Tailwind
-- shadcn/ui initialization
-- ESLint + Prettier
-- Simple config:
-  - `LMS_LOG_ROOT` env var (defaults to `~/.lmstudio/server-logs`)
+- load and search session groups from local LM Studio logs
+- inspect request details, timeline, and tool-call payloads
+- review token/latency metrics at request and session-group level
+- refresh/reindex while preserving a usable UI
+- configure and run optional session naming when credentials are available

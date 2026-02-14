@@ -1,7 +1,7 @@
 # Session Parser Investigation
 
 **Date:** 2026-02-09  
-**Status:** ❌ Blocked - Parser returns 0 sessions despite detecting request events
+**Status:** Fixed
 
 ---
 
